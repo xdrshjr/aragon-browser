@@ -9,7 +9,11 @@ import { scopeRendererParams } from "./space-scope.js";
 import { applyWindowAction } from "./window-controls.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const VERSION = "0.1.0";
+// package.json is the single source of truth. `app.getVersion()` reads it from
+// app.asar when packaged and from the checkout in development, so a release bump
+// cannot leave `runtime.version` reporting the previous build - which is exactly
+// what a hardcoded literal here did.
+const VERSION = app.getVersion();
 
 /**
  * aragon-browser main process.

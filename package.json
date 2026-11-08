@@ -1,6 +1,6 @@
 {
   "name": "aragon-browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A nano browser that AI agents drive through a patched engine boundary",
   "type": "module",

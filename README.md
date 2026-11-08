@@ -9,7 +9,7 @@
 Named after what it actually is: a browser with a patched **engine boundary**,
 not a patched Chromium.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/xdrshjr/aragon-browser/releases/tag/v0.1.0) [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey.svg)](#下载安装) [![Engine](https://img.shields.io/badge/engine-Chromium%20156-4285F4.svg)](#诚实的边界) [![Node](https://img.shields.io/badge/node-22%2B-brightgreen.svg)](package.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](https://github.com/xdrshjr/aragon-browser/releases/tag/v0.1.1) [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey.svg)](#下载安装) [![Engine](https://img.shields.io/badge/engine-Chromium%20156-4285F4.svg)](#诚实的边界) [![Node](https://img.shields.io/badge/node-22%2B-brightgreen.svg)](package.json)
 
 [下载安装](#下载安装) · [30 秒上手](#30-秒上手) · [它改了什么](#诚实的边界) · [架构](#架构) · [已知限制](#已知限制)
 
@@ -55,8 +55,8 @@ RootWebArea "Example Domain" [focused]
 
 | 下载 | 大小 | 适合 |
 |---|---:|---|
-| `aragon-browser-0.1.0-x64.exe` | 116 MB | 日常使用。可选安装目录，建桌面/开始菜单快捷方式，可卸载 |
-| `aragon-browser-0.1.0-portable.exe` | 105 MB | 免安装单文件。不写安装记录 |
+| `aragon-browser-0.1.1-x64.exe` | 116 MB | 日常使用。可选安装目录，建桌面/开始菜单快捷方式，可卸载 |
+| `aragon-browser-0.1.1-portable.exe` | 106 MB | 免安装单文件。不写安装记录 |
 
 > **没有代码签名。** Windows SmartScreen 会拦一次：点「更多信息」→「仍要运行」。
 > 这是开源项目没有代码签名证书的诚实缺口，不是打包出错。
