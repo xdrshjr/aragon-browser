@@ -9,6 +9,7 @@ import { createHelpers } from "./helpers.js";
 import { runScript } from "./run.js";
 import { renderHelp } from "../shared/public-api-schema.js";
 import { skillBodyDir } from "../shared/paths.js";
+import { describeSweep } from "./tab-cleanup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,7 @@ Usage:
 Options:
   -e, --eval <code>      script source instead of stdin
   -s, --space <id|name>  select a task space before the script runs
+      --keep-tabs        keep the tabs this script opened (default: close them)
       --runtime-file <p> coordinates file (default: %TEMP%\\aragon-browser\\runtime.json)
       --json             print the raw result object as JSON
 `;
@@ -37,6 +39,9 @@ function parseArgs(argv) {
     evalCode: null,
     space: null,
     json: false,
+    // Default: a script closes the tabs it opened. `--keep-tabs` (or the env var,
+    // for a host that cannot pass flags) turns that off.
+    keepTabs: process.env.ARAGON_KEEP_TABS === "1",
     runtimeFile: runtimeFilePath(),
   };
   const rest = [];
@@ -52,6 +57,10 @@ function parseArgs(argv) {
     }
     if (arg === "-s" || arg === "--space") {
       options.space = argv[++index] ?? null;
+      continue;
+    }
+    if (arg === "--keep-tabs") {
+      options.keepTabs = true;
       continue;
     }
     if (arg === "--runtime-file") {
@@ -151,9 +160,28 @@ async function main() {
       const space = await helpers.taskSpace(options.space);
       helpers.useTaskSpace(space.id);
     }
-    await runScript(source, helpers, {
-      log: (line) => process.stdout.write(`${line}\n`),
-    });
+    // Everything the script opened is closed on the way out unless it said
+    // otherwise: a run that opens pages and never closes them is what fills the
+    // rail with dead tabs. The `finally` means a failed script is swept too.
+    const focusBaseline = await helpers.__focusBaseline();
+    try {
+      await runScript(source, helpers, {
+        log: (line) => process.stdout.write(`${line}\n`),
+      });
+    } finally {
+      let swept = null;
+      try {
+        swept = await helpers.__sweepTabs({ keepTabs: options.keepTabs });
+      } catch {
+        // A sweep failure must never turn a successful run into a failed one.
+        swept = null;
+      }
+      const note = describeSweep(swept, { keepTabs: options.keepTabs });
+      if (note) process.stderr.write(`${note}\n`);
+      // Acting on a page puts it on screen, so the run may have taken the view from
+      // the human. Give it back before exiting.
+      await helpers.__restoreFocus(focusBaseline);
+    }
     return 0;
   } finally {
     client.close();

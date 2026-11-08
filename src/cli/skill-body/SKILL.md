@@ -35,6 +35,10 @@ Rules that keep runs cheap and reliable:
    locator** (`css:`, `role:`, `text=`, `href:`, `xpath=`) - refs are meant to die.
 3. Batch a multi-step task into one script. Every helper is a plain `await`.
 4. `snapshot({ interactiveOnly: true })` when you only need things to click.
+5. **Close what you opened.** `await page.close()` when you are done with a tab, or
+   `await space.finish({ keep: [] })` at the end. The CLI closes this run's tabs
+   when it exits, but leaving them is how the sidebar fills with dead pages; the
+   full rule is in [Lifecycle](#lifecycle-close-what-you-opened).
 
 ---
 
@@ -72,8 +76,18 @@ Semantics that are easy to get wrong, and are tested:
 
 ## Spaces
 
-A space is an isolated workspace: its own window, tabs, cookies and storage.
-Two spaces never share a login.
+A space is an isolated workspace: its own tabs, cookies and storage. Two spaces
+never share a login.
+
+All spaces live in **one window**: the left rail lists them and clicking one
+shows it - it does not open another window. A space you create shows up in that
+rail, so a second agent's work appears next to the first one's instead of taking
+over the desktop.
+
+Creating a space does not move what the human is looking at. Acting on it does:
+Chromium delivers no real mouse/keyboard input to a page it considers hidden, so
+the space you drive becomes the one on screen. The CLI hands the view back when
+the script ends if it took it from the human.
 
 | helper | what it does |
 |---|---|
@@ -82,15 +96,43 @@ Two spaces never share a login.
 | `listTaskSpaces()` | every space with owner, agent state and tabs |
 | `useTaskSpace(id)` | select by id for the bare helpers |
 | `takeOverTaskSpace(id)` | resume after the user had control |
-| `closeTaskSpace(id)` | close it and its window |
+| `closeTaskSpace(id)` | close it and its tabs (the window stays open) |
 
 A space is owned by `agent` or `user`. While the user owns it, every mutating
 call fails with `EGO_TASK_SPACE_USER_IN_CONTROL`. That is the browser protecting
 the human, not a bug in your script.
 
-`space.finish({ keep })` closes a space properly and **requires** `keep`
+`space.finish({ keep })` closes a space's agent tabs and **requires** `keep`
 (`"all"` or an array of Page labels). Closing tabs is destructive, so there is no
 default; a tab the user opened is never closed by it.
+
+## Lifecycle: close what you opened
+
+Tabs are real browser state, not scratch space. A tab you open stays in the space
+(and in the rail) until it is closed, so a script that opens a page and walks away
+leaves a dead tab behind - every run, forever.
+
+```js
+const page = await space.newPage('https://example.com');
+// ... do the work ...
+await page.close();               // done with THIS tab
+// or, at the end of the task:
+await space.finish({ keep: [] }); // close every agent tab in the space
+```
+
+What happens on its own:
+
+- **The CLI closes the tabs this script opened when it exits.** That is the
+  default, not a courtesy - `--keep-tabs` (or `ARAGON_KEEP_TABS=1`) turns it off.
+- **`page.keep()` opts one page out.** Use it when the NEXT script will act on the
+  same tab (`space.page('p2')`), because a swept tab takes its scroll position,
+  form state and history with it.
+- **`space.handOff()` keeps that space's tabs.** The human owns them now.
+- Tabs you did not open in this run are never swept, and a space owned by `user`
+  is never touched by the agent.
+
+Rules of thumb: one task = one script = close the pages it opened. If you are
+handing work to the human, use `handOff()` instead of leaving tabs open.
 
 ## Pages
 

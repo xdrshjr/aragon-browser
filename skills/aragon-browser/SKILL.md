@@ -45,6 +45,15 @@ far cheaper than a command per step.
 5. **`taskSpace(name)` switches the selected space globally**, so bare helpers
    (`snapshot`, `runSiteTool`) follow it. Use `space.xxx` / `page.xxx` in scripts
    that touch more than one space.
+6. **Close what you opened.** Spaces share ONE window (the left rail switches
+   between them), and a tab you never close stays in that rail for the rest of the
+   browser's life. `await page.close()` when you are done with a tab,
+   `await space.finish({ keep: [] })` at the end of a task, and `page.keep()` only
+   when the next round reuses the same tab. The CLI also closes this run's tabs
+   when it exits; `--keep-tabs` turns that off.
+7. **Creating a space does not move the human's view; acting in one does.** A page
+   Chromium considers hidden receives no real mouse/keyboard input, so the space you
+   drive is the space on screen. The CLI gives the view back when the script ends.
 
 ## When something is wrong
 

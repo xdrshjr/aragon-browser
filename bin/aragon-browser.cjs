@@ -661,7 +661,7 @@ var PUBLIC_API_SCHEMA = [
     name: "createTaskSpace",
     signature: "await createTaskSpace(name, profileId?)",
     area: "spaces",
-    summary: "Create a space. profileId comes from listProfiles()."
+    summary: "Create a space. It appears in the window's sidebar (spaces share one window). profileId comes from listProfiles()."
   },
   {
     name: "claimTaskSpace",
@@ -685,7 +685,7 @@ var PUBLIC_API_SCHEMA = [
     name: "closeTaskSpace",
     signature: "await closeTaskSpace(id?)",
     area: "spaces",
-    summary: "Close a space and its window."
+    summary: "Close a space and its tabs. The window stays open: every space shares it."
   },
   // --- TaskSpace methods ---------------------------------------------------
   {
@@ -722,8 +722,14 @@ var PUBLIC_API_SCHEMA = [
     name: "TaskSpace.finish",
     signature: "await space.finish({ keep })",
     area: "space-methods",
-    summary: 'keep is required: "all" or an array of Page labels. Closes agent tabs, never a tab the user opened.',
+    summary: 'keep is required: "all" or an array of Page labels. Closes agent tabs, never a tab the user opened. The space stays in the sidebar unless it is empty.',
     options: { keep: "keep" }
+  },
+  {
+    name: "TaskSpace.close",
+    signature: "await space.close()",
+    area: "space-methods",
+    summary: "Close the space and its tabs. Spaces share one window, so the window stays open for the others."
   },
   {
     name: "TaskSpace.waitForControl",
@@ -899,6 +905,18 @@ var PUBLIC_API_SCHEMA = [
     signature: "await page.reload()",
     area: "act",
     summary: "Reload the current document."
+  },
+  {
+    name: "Page.close",
+    signature: "await page.close()",
+    area: "act",
+    summary: "Close this page's tab. Call it when the task is done with a page: an unclosed tab stays in the space (and in the sidebar) forever."
+  },
+  {
+    name: "Page.keep",
+    signature: "page.keep()",
+    area: "act",
+    summary: "Keep this page when the script ends. The CLI closes tabs the script opened; call keep() on a page the next round will act on."
   },
   // --- waiting -------------------------------------------------------------
   {
@@ -1100,6 +1118,65 @@ function renderHelp() {
   return lines.join("\n");
 }
 
+// src/cli/tab-cleanup.js
+function planSweep({
+  tracked = [],
+  openTabs = [],
+  userOwnedSpaceIds = [],
+  keepTabs = false
+} = {}) {
+  const userOwned = new Set(userOwnedSpaceIds.map(Number));
+  const openIndex = new Map(openTabs.map((tab) => [`${Number(tab.spaceId)}:${tab.id}`, tab]));
+  const result = {
+    close: [],
+    keep: [],
+    gone: [],
+    skippedUserOwned: [],
+    disabled: Boolean(keepTabs)
+  };
+  for (const entry of tracked) {
+    const spaceId = Number(entry.spaceId);
+    const open = openIndex.get(`${spaceId}:${entry.tabId}`) ?? null;
+    const record = {
+      spaceId,
+      tabId: entry.tabId,
+      label: entry.label ?? open?.label ?? null
+    };
+    if (keepTabs) {
+      result.keep.push(record);
+      continue;
+    }
+    if (open === null) {
+      result.gone.push(record);
+      continue;
+    }
+    if (entry.kept === true) {
+      result.keep.push(record);
+      continue;
+    }
+    if (userOwned.has(spaceId)) {
+      result.skippedUserOwned.push(record);
+      continue;
+    }
+    result.close.push(record);
+  }
+  return result;
+}
+function describeSweep(result, { keepTabs = false } = {}) {
+  if (!result) return null;
+  if (keepTabs) {
+    return result.keep.length > 0 ? `aragon-browser: kept ${result.keep.length} tab(s) opened by this script (--keep-tabs)` : null;
+  }
+  if (result.close.length > 0) {
+    const labels = result.close.map((entry) => entry.label ?? `tab-${entry.tabId}`).join(", ");
+    return `aragon-browser: closed ${result.close.length} tab(s) this script left open (${labels}); use page.close() when done, or --keep-tabs / page.keep() to keep them`;
+  }
+  if (result.skippedUserOwned.length > 0) {
+    return `aragon-browser: left ${result.skippedUserOwned.length} tab(s) alone because the space belongs to the user`;
+  }
+  return null;
+}
+
 // src/cli/helpers.js
 var SCHEMA_BY_NAME = new Map(PUBLIC_API_SCHEMA.map((entry) => [entry.name, entry]));
 function checkOptions(apiName, options) {
@@ -1127,6 +1204,15 @@ function createHelpers(client, { log = console.log } = {}) {
     return Math.max(DEFAULT_TIMEOUT_MS2, requested) + TIMEOUT_SLACK_MS;
   }
   const call = (method, params = {}) => client.request(method, params, { timeoutMs: timeoutFor(method, params) });
+  const runTabs = /* @__PURE__ */ new Map();
+  function trackTab(spaceId, tabId, label, { kept = false } = {}) {
+    if (!Number.isInteger(tabId)) return;
+    runTabs.set(`${spaceId}:${tabId}`, { spaceId: Number(spaceId), tabId, label, kept });
+  }
+  function untrackTab(spaceId, tabId) {
+    if (!Number.isInteger(tabId)) return;
+    runTabs.delete(`${Number(spaceId)}:${tabId}`);
+  }
   const withSpace = (params = {}) => {
     if (selectedSpaceId === null) {
       throw new AragonError(
@@ -1139,14 +1225,14 @@ function createHelpers(client, { log = console.log } = {}) {
   async function resolveSpace(nameOrId) {
     if (nameOrId === void 0 || nameOrId === null) {
       const { spaces: spaces2 } = await call("spaces.list");
-      if (spaces2.length === 0) {
-        const created2 = await call("spaces.create", {});
-        selectedSpaceId = created2.id;
-        return created2;
+      const agentSpace = spaces2.find((space) => space.owner === "agent") ?? null;
+      if (agentSpace) {
+        selectedSpaceId = agentSpace.id;
+        return agentSpace;
       }
-      const agentSpace = spaces2.find((space) => space.owner === "agent") ?? spaces2[0];
-      selectedSpaceId = agentSpace.id;
-      return agentSpace;
+      const created2 = await call("spaces.create", {});
+      selectedSpaceId = created2.id;
+      return created2;
     }
     if (Number.isInteger(nameOrId) || /^\d+$/.test(String(nameOrId))) {
       const id = Number(nameOrId);
@@ -1170,6 +1256,7 @@ function createHelpers(client, { log = console.log } = {}) {
       this.spaceId = spaceId;
       this.tabId = tabId;
       this.label = label;
+      this.kept = false;
     }
     async #ensureTab() {
       const { tabs } = await call("tabs.list", { spaceId: this.spaceId });
@@ -1177,6 +1264,7 @@ function createHelpers(client, { log = console.log } = {}) {
         const created = await call("tabs.create", { spaceId: this.spaceId, url: "about:blank" });
         this.tabId = created.id;
         this.label = created.label ?? this.label;
+        trackTab(this.spaceId, created.id, this.label, { kept: this.kept });
         return;
       }
       const target = this.tabId ? tabs.find((tab) => tab.id === this.tabId) : tabs.at(-1);
@@ -1210,6 +1298,44 @@ function createHelpers(client, { log = console.log } = {}) {
         this.label = active.label ?? this.label;
       }
       return result;
+    }
+    /**
+     * Close THIS page's tab.
+     *
+     * The counterpart of `space.newPage()`: an agent that opens a page and is done
+     * with it should close it, or the tab stays in the space (and in the rail) for
+     * the rest of the browser's life. Never creates a tab as a side effect - a
+     * handle for a label that is already gone just reports `closed: false`.
+     */
+    async close() {
+      const { tabs } = await call("tabs.list", { spaceId: this.spaceId });
+      const target = (this.tabId !== null ? tabs.find((tab) => tab.id === this.tabId) : null) ?? (this.label !== null ? tabs.find((tab) => tab.label === this.label) : null) ?? null;
+      if (!target) {
+        untrackTab(this.spaceId, this.tabId);
+        return { closed: false, label: this.label ?? null };
+      }
+      await call("tabs.close", { spaceId: this.spaceId, tabId: target.id });
+      untrackTab(this.spaceId, target.id);
+      this.tabId = null;
+      this.label = target.label ?? this.label;
+      return { closed: true, label: this.label ?? null };
+    }
+    /**
+     * Keep this page when the script ends.
+     *
+     * Use it when the NEXT round will act on the same tab (`space.page('p2')`), so
+     * the end-of-run sweep does not close the state you are about to reuse.
+     */
+    keep() {
+      this.kept = true;
+      for (const entry of runTabs.values()) {
+        const sameTab = this.tabId !== null && entry.tabId === this.tabId;
+        const sameLabel = this.label !== null && entry.label === this.label;
+        if (entry.spaceId === Number(this.spaceId) && (sameTab || sameLabel)) {
+          entry.kept = true;
+        }
+      }
+      return { kept: true, label: this.label ?? null };
     }
     async info() {
       return this.#call("page.info");
@@ -1398,6 +1524,7 @@ function createHelpers(client, { log = console.log } = {}) {
     async newPage(url = "about:blank") {
       const tab = await call("tabs.create", { spaceId: this.id, url });
       this._tabs.push(tab);
+      trackTab(this.id, tab.id, tab.label ?? null);
       return new Page(this.id, tab.id, tab.label);
     }
     async page_() {
@@ -1526,6 +1653,88 @@ function createHelpers(client, { log = console.log } = {}) {
     cliLog(...args) {
       log(args.map((arg) => typeof arg === "string" ? arg : safeJson(arg)).join(" "));
     },
+    /**
+     * Internal: what `index.js` runs after the script finishes.
+     *
+     * Not part of the documented surface (hence the `__` prefix), but it lives here
+     * because the tracking does. It never throws: a sweep failure must not turn a
+     * successful run into a failed one.
+     */
+    async __sweepTabs({ keepTabs = false } = {}) {
+      const empty = {
+        close: [],
+        keep: [],
+        gone: [],
+        skippedUserOwned: [],
+        disabled: Boolean(keepTabs)
+      };
+      if (runTabs.size === 0) return empty;
+      let spacesList = [];
+      try {
+        spacesList = (await call("spaces.list")).spaces ?? [];
+      } catch {
+        return empty;
+      }
+      const openTabs = [];
+      const userOwnedSpaceIds = [];
+      for (const space of spacesList) {
+        if (space.owner === "user") userOwnedSpaceIds.push(space.id);
+        for (const tab of space.tabs ?? []) {
+          openTabs.push({ spaceId: space.id, id: tab.id, label: tab.label ?? null });
+        }
+      }
+      const plan = planSweep({
+        tracked: [...runTabs.values()],
+        openTabs,
+        userOwnedSpaceIds,
+        keepTabs
+      });
+      for (const entry of plan.close) {
+        try {
+          await call("tabs.close", { spaceId: entry.spaceId, tabId: entry.tabId });
+        } catch {
+        }
+      }
+      return plan;
+    },
+    /**
+     * Internal: which space the human is looking at before this run starts.
+     *
+     * Acting on a page requires it to be on screen (Chromium drops input for a
+     * hidden one), so a run on an agent space replaces the view. Remembering the
+     * baseline lets `__restoreFocus` hand the view back afterwards.
+     */
+    async __focusBaseline() {
+      try {
+        const { spaces } = await call("spaces.list");
+        const focused = spaces.find((space) => space.focused) ?? null;
+        return focused ? { id: focused.id, owner: focused.owner } : null;
+      } catch {
+        return null;
+      }
+    },
+    /**
+     * Internal: give the view back if this run took it from the human.
+     *
+     * Only when the baseline space belonged to the human, and only when the agent is
+     * still the one holding the view - if the human clicked somewhere else during
+     * the run, that choice stands.
+     */
+    async __restoreFocus(baseline) {
+      if (!baseline || baseline.owner !== "user") return null;
+      try {
+        const { spaces } = await call("spaces.list");
+        const focused = spaces.find((space) => space.focused) ?? null;
+        if (!focused || focused.id === baseline.id) return null;
+        if (focused.owner !== "agent") return null;
+        const target = spaces.find((space) => space.id === baseline.id) ?? null;
+        if (!target || target.owner !== "user") return null;
+        await call("spaces.focus", { spaceId: baseline.id });
+        return baseline.id;
+      } catch {
+        return null;
+      }
+    },
     help() {
       log(renderHelp());
     }
@@ -1590,6 +1799,7 @@ Usage:
 Options:
   -e, --eval <code>      script source instead of stdin
   -s, --space <id|name>  select a task space before the script runs
+      --keep-tabs        keep the tabs this script opened (default: close them)
       --runtime-file <p> coordinates file (default: %TEMP%\\aragon-browser\\runtime.json)
       --json             print the raw result object as JSON
 `;
@@ -1599,6 +1809,9 @@ function parseArgs(argv) {
     evalCode: null,
     space: null,
     json: false,
+    // Default: a script closes the tabs it opened. `--keep-tabs` (or the env var,
+    // for a host that cannot pass flags) turns that off.
+    keepTabs: import_node_process.default.env.ARAGON_KEEP_TABS === "1",
     runtimeFile: runtimeFilePath()
   };
   const rest = [];
@@ -1614,6 +1827,10 @@ function parseArgs(argv) {
     }
     if (arg === "-s" || arg === "--space") {
       options.space = argv[++index] ?? null;
+      continue;
+    }
+    if (arg === "--keep-tabs") {
+      options.keepTabs = true;
       continue;
     }
     if (arg === "--runtime-file") {
@@ -1710,10 +1927,24 @@ async function main() {
       const space = await helpers.taskSpace(options.space);
       helpers.useTaskSpace(space.id);
     }
-    await runScript(source, helpers, {
-      log: (line) => import_node_process.default.stdout.write(`${line}
+    const focusBaseline = await helpers.__focusBaseline();
+    try {
+      await runScript(source, helpers, {
+        log: (line) => import_node_process.default.stdout.write(`${line}
 `)
-    });
+      });
+    } finally {
+      let swept = null;
+      try {
+        swept = await helpers.__sweepTabs({ keepTabs: options.keepTabs });
+      } catch {
+        swept = null;
+      }
+      const note = describeSweep(swept, { keepTabs: options.keepTabs });
+      if (note) import_node_process.default.stderr.write(`${note}
+`);
+      await helpers.__restoreFocus(focusBaseline);
+    }
     return 0;
   } finally {
     client.close();

@@ -6,6 +6,7 @@ import {
   renderHelp,
   validateOptions,
 } from "../shared/public-api-schema.js";
+import { planSweep } from "./tab-cleanup.js";
 
 const SCHEMA_BY_NAME = new Map(PUBLIC_API_SCHEMA.map((entry) => [entry.name, entry]));
 
@@ -56,6 +57,30 @@ export function createHelpers(client, { log = console.log } = {}) {
   const call = (method, params = {}) =>
     client.request(method, params, { timeoutMs: timeoutFor(method, params) });
 
+  /**
+   * Tabs this script opened, and whether the script said to keep them.
+   *
+   * A tab an agent opens is its own working state. When the script exits without
+   * closing it, it stays in the space and in the rail forever - that is the "tabs
+   * keep multiplying" bug. `index.js` runs `sweepRunTabs()` on the way out, so the
+   * default is "close what I opened" and keeping is the explicit choice
+   * (`page.keep()`, `space.handOff()`, or `--keep-tabs`).
+   *
+   * Tabs that already existed (from an earlier round) are NOT tracked: this script
+   * did not open them, so it must not be the one to close them.
+   */
+  const runTabs = new Map();
+
+  function trackTab(spaceId, tabId, label, { kept = false } = {}) {
+    if (!Number.isInteger(tabId)) return;
+    runTabs.set(`${spaceId}:${tabId}`, { spaceId: Number(spaceId), tabId, label, kept });
+  }
+
+  function untrackTab(spaceId, tabId) {
+    if (!Number.isInteger(tabId)) return;
+    runTabs.delete(`${Number(spaceId)}:${tabId}`);
+  }
+
   const withSpace = (params = {}) => {
     if (selectedSpaceId === null) {
       throw new AragonError(
@@ -69,14 +94,17 @@ export function createHelpers(client, { log = console.log } = {}) {
   async function resolveSpace(nameOrId) {
     if (nameOrId === undefined || nameOrId === null) {
       const { spaces } = await call("spaces.list");
-      if (spaces.length === 0) {
-        const created = await call("spaces.create", {});
-        selectedSpaceId = created.id;
-        return created;
+      // Only an agent-owned space is picked implicitly. Falling back to "the first
+      // space" grabbed the human's own space and then failed every mutating call
+      // with EGO_TASK_SPACE_USER_IN_CONTROL - or worse, switched their view.
+      const agentSpace = spaces.find((space) => space.owner === "agent") ?? null;
+      if (agentSpace) {
+        selectedSpaceId = agentSpace.id;
+        return agentSpace;
       }
-      const agentSpace = spaces.find((space) => space.owner === "agent") ?? spaces[0];
-      selectedSpaceId = agentSpace.id;
-      return agentSpace;
+      const created = await call("spaces.create", {});
+      selectedSpaceId = created.id;
+      return created;
     }
     if (Number.isInteger(nameOrId) || /^\d+$/.test(String(nameOrId))) {
       const id = Number(nameOrId);
@@ -101,6 +129,8 @@ export function createHelpers(client, { log = console.log } = {}) {
       this.spaceId = spaceId;
       this.tabId = tabId;
       this.label = label;
+      // Set by page.keep(): this tab survives the end-of-run sweep.
+      this.kept = false;
     }
 
     async #ensureTab() {
@@ -109,6 +139,7 @@ export function createHelpers(client, { log = console.log } = {}) {
         const created = await call("tabs.create", { spaceId: this.spaceId, url: "about:blank" });
         this.tabId = created.id;
         this.label = created.label ?? this.label;
+        trackTab(this.spaceId, created.id, this.label, { kept: this.kept });
         return;
       }
       const target = this.tabId
@@ -146,6 +177,49 @@ export function createHelpers(client, { log = console.log } = {}) {
         this.label = active.label ?? this.label;
       }
       return result;
+    }
+
+    /**
+     * Close THIS page's tab.
+     *
+     * The counterpart of `space.newPage()`: an agent that opens a page and is done
+     * with it should close it, or the tab stays in the space (and in the rail) for
+     * the rest of the browser's life. Never creates a tab as a side effect - a
+     * handle for a label that is already gone just reports `closed: false`.
+     */
+    async close() {
+      const { tabs } = await call("tabs.list", { spaceId: this.spaceId });
+      const target =
+        (this.tabId !== null ? tabs.find((tab) => tab.id === this.tabId) : null) ??
+        (this.label !== null ? tabs.find((tab) => tab.label === this.label) : null) ??
+        null;
+      if (!target) {
+        untrackTab(this.spaceId, this.tabId);
+        return { closed: false, label: this.label ?? null };
+      }
+      await call("tabs.close", { spaceId: this.spaceId, tabId: target.id });
+      untrackTab(this.spaceId, target.id);
+      this.tabId = null;
+      this.label = target.label ?? this.label;
+      return { closed: true, label: this.label ?? null };
+    }
+
+    /**
+     * Keep this page when the script ends.
+     *
+     * Use it when the NEXT round will act on the same tab (`space.page('p2')`), so
+     * the end-of-run sweep does not close the state you are about to reuse.
+     */
+    keep() {
+      this.kept = true;
+      for (const entry of runTabs.values()) {
+        const sameTab = this.tabId !== null && entry.tabId === this.tabId;
+        const sameLabel = this.label !== null && entry.label === this.label;
+        if (entry.spaceId === Number(this.spaceId) && (sameTab || sameLabel)) {
+          entry.kept = true;
+        }
+      }
+      return { kept: true, label: this.label ?? null };
     }
 
     async info() {
@@ -378,6 +452,8 @@ export function createHelpers(client, { log = console.log } = {}) {
     async newPage(url = "about:blank") {
       const tab = await call("tabs.create", { spaceId: this.id, url });
       this._tabs.push(tab);
+      // Tracked so the end-of-run sweep closes it unless the script says keep.
+      trackTab(this.id, tab.id, tab.label ?? null);
       return new Page(this.id, tab.id, tab.label);
     }
 
@@ -400,6 +476,9 @@ export function createHelpers(client, { log = console.log } = {}) {
 
     async handOff() {
       const descriptor = await call("spaces.handOff", { spaceId: this.id });
+      // Nothing is marked here on purpose: the sweep reads ownership when it runs,
+      // so a space handed to the human is skipped, and one taken back with
+      // takeOverTaskSpace() is swept again. A sticky "kept" flag got that wrong.
       Object.assign(this, { owner: descriptor.owner, ownership: descriptor.owner });
       return descriptor;
     }
@@ -534,6 +613,94 @@ export function createHelpers(client, { log = console.log } = {}) {
 
     cliLog(...args) {
       log(args.map((arg) => (typeof arg === "string" ? arg : safeJson(arg))).join(" "));
+    },
+
+    /**
+     * Internal: what `index.js` runs after the script finishes.
+     *
+     * Not part of the documented surface (hence the `__` prefix), but it lives here
+     * because the tracking does. It never throws: a sweep failure must not turn a
+     * successful run into a failed one.
+     */
+    async __sweepTabs({ keepTabs = false } = {}) {
+      const empty = {
+        close: [],
+        keep: [],
+        gone: [],
+        skippedUserOwned: [],
+        disabled: Boolean(keepTabs),
+      };
+      if (runTabs.size === 0) return empty;
+      let spacesList = [];
+      try {
+        spacesList = (await call("spaces.list")).spaces ?? [];
+      } catch {
+        return empty;
+      }
+      const openTabs = [];
+      const userOwnedSpaceIds = [];
+      for (const space of spacesList) {
+        if (space.owner === "user") userOwnedSpaceIds.push(space.id);
+        for (const tab of space.tabs ?? []) {
+          openTabs.push({ spaceId: space.id, id: tab.id, label: tab.label ?? null });
+        }
+      }
+      const plan = planSweep({
+        tracked: [...runTabs.values()],
+        openTabs,
+        userOwnedSpaceIds,
+        keepTabs,
+      });
+      for (const entry of plan.close) {
+        try {
+          await call("tabs.close", { spaceId: entry.spaceId, tabId: entry.tabId });
+        } catch {
+          // The space or the tab went away between the listing and the close.
+        }
+      }
+      // Deliberately not cleared: a second call must see the same intent, and the
+      // tabs it already closed come back as `gone`, which is not an error.
+      return plan;
+    },
+
+    /**
+     * Internal: which space the human is looking at before this run starts.
+     *
+     * Acting on a page requires it to be on screen (Chromium drops input for a
+     * hidden one), so a run on an agent space replaces the view. Remembering the
+     * baseline lets `__restoreFocus` hand the view back afterwards.
+     */
+    async __focusBaseline() {
+      try {
+        const { spaces } = await call("spaces.list");
+        const focused = spaces.find((space) => space.focused) ?? null;
+        return focused ? { id: focused.id, owner: focused.owner } : null;
+      } catch {
+        return null;
+      }
+    },
+
+    /**
+     * Internal: give the view back if this run took it from the human.
+     *
+     * Only when the baseline space belonged to the human, and only when the agent is
+     * still the one holding the view - if the human clicked somewhere else during
+     * the run, that choice stands.
+     */
+    async __restoreFocus(baseline) {
+      if (!baseline || baseline.owner !== "user") return null;
+      try {
+        const { spaces } = await call("spaces.list");
+        const focused = spaces.find((space) => space.focused) ?? null;
+        if (!focused || focused.id === baseline.id) return null;
+        if (focused.owner !== "agent") return null;
+        const target = spaces.find((space) => space.id === baseline.id) ?? null;
+        if (!target || target.owner !== "user") return null;
+        await call("spaces.focus", { spaceId: baseline.id });
+        return baseline.id;
+      } catch {
+        return null;
+      }
     },
 
     help() {

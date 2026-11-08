@@ -186,64 +186,161 @@ test("the IPC handler actually forwards the action it was given", () => {
   assert.match(handler.slice(0, handler.indexOf("});")), /BrowserWindow\.fromWebContents/);
 });
 
-test("renderer RPCs are pinned to the window that sent them", () => {
+test("renderer RPCs are pinned to the space the window is showing", () => {
   const main = read("src", "main", "main.js");
-  assert.match(main, /scopeRendererParams/, "a payload spaceId could otherwise address another window");
-  assert.match(main, /spaceIdForContents/, "the sender's space must come from the window, not the payload");
+  assert.match(main, /scopeRendererParams/, "a payload spaceId could otherwise address a background space");
+  assert.match(
+    main,
+    /focusedSpaceIdForContents/,
+    "the sender's space must come from the window's focused space, not the payload",
+  );
   const scope = read("src", "main", "space-scope.js");
   assert.match(scope, /refused \$\{method\} for space/, "a foreign spaceId must be refused, not clamped");
 });
 
-test("space scoping: a window cannot touch a sibling, but the sidebar still works", () => {
-  // Pin the window's own space.
+test("space scoping: a window cannot touch a background space, but the sidebar still works", () => {
+  // Pin the space the window is showing.
   assert.deepEqual(
     scopeRendererParams({ method: "ui.navigate", params: { spaceId: 1, url: "https://x" }, senderSpaceId: 1 }),
     { ok: true, params: { spaceId: 1, url: "https://x" } },
   );
-  // Naming a sibling is refused, not silently redirected: redirecting would make
-  // the sidebar appear to work while navigating the wrong window.
+  // Naming a background space is refused, not silently redirected: redirecting would
+  // make the sidebar appear to work while navigating the wrong space.
   for (const method of [
     "ui.navigate",
     "ui.newTab",
     "ui.closeTab",
-    "ui.closeSpace",
     "ui.handOff",
     "ui.takeOver",
   ]) {
     const result = scopeRendererParams({ method, params: { spaceId: 2 }, senderSpaceId: 1 });
-    assert.equal(result.ok, false, `${method} must not reach another space`);
-    assert.match(result.error, /from the window of space 1/);
+    assert.equal(result.ok, false, `${method} must not reach a background space`);
+    assert.match(result.error, /the window is showing space 1/);
   }
-  // Clicking a space in the sidebar focuses a SIBLING window - the one deliberate
-  // exception. Without it the whole left rail silently stops working.
-  const focus = scopeRendererParams({
-    method: "ui.focusSpace",
-    params: { spaceId: 2 },
-    senderSpaceId: 1,
-  });
-  assert.equal(focus.ok, true);
-  assert.equal(focus.params.spaceId, 2);
+  // The rail's own actions: switching, creating, and the ✕ on any row.
+  for (const method of ["ui.focusSpace", "ui.newSpace", "ui.closeSpace"]) {
+    const result = scopeRendererParams({ method, params: { spaceId: 2 }, senderSpaceId: 1 });
+    assert.equal(result.ok, true, `${method} is a rail action and must stay reachable`);
+  }
   // A missing spaceId is filled from the sender, not left to the kernel's global
-  // "current space", which can point at a sibling.
+  // "current space", which can point at a background space.
   const filled = scopeRendererParams({ method: "ui.reload", params: {}, senderSpaceId: 7 });
   assert.equal(filled.params.spaceId, 7);
+  // `null` is unset, not "some other space": the chrome has no focused space to
+  // send before the first state push, and refusing that would break the rail on a
+  // cold window instead of letting the kernel fill in the visible space.
+  const nulled = scopeRendererParams({
+    method: "ui.reload",
+    params: { spaceId: null },
+    senderSpaceId: 7,
+  });
+  assert.equal(nulled.ok, true, "a null spaceId must not be refused as foreign");
+  assert.equal(nulled.params.spaceId, 7);
   // A non-space window (the API window) has nothing to pin to.
   const api = scopeRendererParams({ method: "ui.state", params: {}, senderSpaceId: null });
   assert.equal(api.ok, true);
 });
 
-test("the window title stays unique per space", () => {
+test("the window title stays unique and follows the focused space", () => {
   const windowSource = read("src", "kernel", "task-spaces.js");
   // The title is the key `ui.captureWindow` uses. Two spaces may share a name
   // ("space-3" reused after a close), so the id has to be in the title, and the
   // renderer's <title> must not overwrite it.
-  assert.match(windowSource, /aragon-browser - \$\{space\.name\} \(#\$\{id\}\)/);
+  assert.match(windowSource, /aragon-browser - \$\{space\.name\} \(#\$\{space\.id\}\)/);
   const handler = windowSource.slice(windowSource.indexOf('window.on("page-title-updated"'));
   assert.match(
     handler.slice(0, handler.indexOf("\n")),
     /event\.preventDefault\(\)/,
     "without preventDefault the renderer renames every window to <title>",
   );
+});
+
+test("every space lives in one window, and switching is in-window", () => {
+  const windowSource = read("src", "kernel", "task-spaces.js");
+
+  // Exactly one construction site: the shell window. A second `new BrowserWindow`
+  // anywhere in this manager is the "second agent opened a window" bug back again.
+  const constructions = [...windowSource.matchAll(/new BrowserWindow\(/g)];
+  assert.equal(constructions.length, 1, `expected 1 BrowserWindow, found ${constructions.length}`);
+  assert.match(windowSource, /#ensureWindow\(\)/, "the shell window must be created lazily and shared");
+
+  // Spaces never build their own window: they are tab sets inside the shell.
+  const createBody = windowSource.slice(
+    windowSource.indexOf("async create({"),
+    windowSource.indexOf("setFocusedSpace("),
+  );
+  assert.doesNotMatch(createBody, /new BrowserWindow\(/, "create() must not open a window per space");
+  assert.match(createBody, /#ensureWindow\(\)/, "create() must reuse the shell window");
+
+  // Visibility is derived from the focused space, never stored, or a background
+  // space keeps painting over the one the human is looking at.
+  const layoutStart = windowSource.indexOf("layout() {");
+  const layoutBody = windowSource.slice(layoutStart, windowSource.indexOf("\n  }\n", layoutStart));
+  assert.match(
+    layoutBody,
+    /space\.id === this\.focusedSpaceId/,
+    "only the focused space's active tab may occupy the page area",
+  );
+  // Parking off-window is not cosmetic: setVisible(false) also drops input, so a
+  // hidden agent page can be seen but not clicked (the smoke suite catches it).
+  assert.match(
+    layoutBody,
+    /offStage|x: width \+ 8/,
+    "background tabs must be parked outside the window, not hidden",
+  );
+
+  // A closing window takes every space with it; a closing space must not destroy
+  // the window its siblings still live in.
+  assert.match(windowSource, /#dispose\(space\)[^]*this\.spaces\.size === 0/, "the window closes only with the last space");
+});
+
+test("the agent's new space never steals the human's view", () => {
+  const windowSource = read("src", "kernel", "task-spaces.js");
+  const focusStart = windowSource.indexOf("focusForAgent(space) {");
+  const focus = windowSource.slice(focusStart, windowSource.indexOf("ensureOnStage(space) {"));
+  assert.match(focus, /current\.owner === "agent"/, "only an agent-owned view may be replaced");
+  assert.match(focus, /return false/, "the caller must be able to tell it stayed put");
+
+  // Acting is different from selecting: Chromium drops real input for a page it
+  // considers hidden, so the page an agent drives has to be the one on screen.
+  const activeStart = windowSource.indexOf("activeTab(spaceId) {");
+  const activeBody = windowSource.slice(activeStart, windowSource.indexOf("\n  }", activeStart));
+  assert.match(
+    activeBody,
+    /this\.ensureOnStage\(space\)/,
+    "every acting path must bring its space on stage, or clicks are silently dropped",
+  );
+
+  // The renderer reads the focused space from the pushed state, not from a value
+  // baked into the preload at window creation time.
+  const ui = read("src", "renderer", "ui.js");
+  assert.match(ui, /focusedSpaceId/, "the chrome has to follow the pushed focused space");
+  assert.doesNotMatch(read("src", "preload", "ui-preload.js"), /aragon-space-id/, "no per-window space id any more");
+});
+
+test("the sidebar and the agent surface both switch spaces in-window", () => {
+  const kernel = read("src", "kernel", "browser-kernel.js");
+  // The rail's click and the kernel's spaces.focus must reach the SAME function -
+  // otherwise the sidebar keeps its old "focus a sibling window" meaning.
+  for (const method of ["ui.focusSpace", "spaces.focus"]) {
+    const start = kernel.indexOf(`"${method}": async`);
+    assert.notEqual(start, -1, `${method} is missing`);
+    const body = kernel.slice(start, kernel.indexOf("\n      },", start));
+    assert.match(body, /spaces\.setFocusedSpace\(space\.id\)/, `${method} must switch in-window`);
+    assert.doesNotMatch(body, /new BrowserWindow/, `${method} must not open a window`);
+  }
+  // Window- and chrome-level captures have to bring their space forward, or the
+  // picture is of whatever the human happened to be looking at.
+  for (const method of ["ui.captureChrome", "ui.captureWindow", "ui.layout"]) {
+    const start = kernel.indexOf(`"${method}": async`);
+    assert.notEqual(start, -1, `${method} is missing`);
+    const body = kernel.slice(start, kernel.indexOf("\n      },", start));
+    assert.match(
+      body,
+      /spaces\.setFocusedSpace\(space\.id\)/,
+      `${method} must show the space it was asked about`,
+    );
+  }
 });
 
 test("every glyph is centred on an integer row", () => {

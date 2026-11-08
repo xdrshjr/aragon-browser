@@ -351,6 +351,70 @@ if (String(cookieB).includes("probe=a")) {
 cliLog("PASS spaces are cookie-isolated (separate session partitions)");
 
 // ===========================================================================
+// 13b. one window, many spaces
+// ===========================================================================
+// The bug this guards: a second agent asking for a space used to get its own
+// BrowserWindow, so "spaces" were really windows. Now every space is a tab set
+// inside the one shell window, and the rail switches between them.
+const version = await browserVersion();
+if (version.windows !== 1) {
+  throw new Error(
+    `spaces opened extra windows: windows=${version.windows} for ${version.spaces} spaces`,
+  );
+}
+if (version.spaces < 4) {
+  throw new Error(`expected several spaces by now, got ${version.spaces}`);
+}
+if (!Number.isInteger(version.focusedSpaceId)) {
+  throw new Error(`the runtime did not report a focused space: ${JSON.stringify(version)}`);
+}
+cliLog(
+  `PASS ${version.spaces} spaces share ${version.windows} window ` +
+    `(focused space ${version.focusedSpaceId})`,
+);
+
+// ===========================================================================
+// 13c. focus policy: creating a space is quiet, driving one is visible
+// ===========================================================================
+// The human is looking at a space of their own. A second agent asking for a new
+// space has to end up in the rail, not take over the screen. The moment it acts on
+// that space, though, the space comes on stage - Chromium drops real input for a
+// page it considers hidden, so "background" means "not composited yet", not
+// "unclickable".
+const humanSpace = await taskSpace("human-view");
+await humanSpace.handOff();
+const backgroundSpace = await taskSpace("bg-work");
+const bgPage = await backgroundSpace.newPage(FIXTURE_URL);
+const focusedAfterCreate = (await listTaskSpaces()).find((entry) => entry.focused);
+if (focusedAfterCreate?.id !== humanSpace.id) {
+  throw new Error(
+    `creating an agent space stole the view from the human: focused "${focusedAfterCreate?.name}"`,
+  );
+}
+cliLog(`PASS the agent's space appeared without leaving space ${humanSpace.id}`);
+
+await bgPage.waitForLoad();
+const focusedAfterAct = (await listTaskSpaces()).find((entry) => entry.focused);
+if (focusedAfterAct?.id !== backgroundSpace.id) {
+  throw new Error(
+    `acting on a space did not bring it on stage: focused "${focusedAfterAct?.name}"`,
+  );
+}
+cliLog("PASS acting on a space put it on stage (a hidden page drops real input)");
+
+// Input must land for real - a dispatched click that changes nothing is the exact
+// failure mode a visibility-only check would hide.
+await bgPage.click("css:#go");
+const bgResult = await bgPage.evaluate("document.getElementById('result')?.textContent ?? ''");
+if (!String(bgResult).startsWith("clicked")) {
+  throw new Error(`a click did not reach the page: "${bgResult}"`);
+}
+cliLog("PASS the click reached the agent's page");
+
+// Hand it back so the rest of the run behaves like a normal agent session.
+await takeOverTaskSpace(humanSpace.id);
+
+// ===========================================================================
 // 14. control handoff
 // ===========================================================================
 await space.handOff();

@@ -75,14 +75,21 @@ async function boot() {
   buildAppMenu(setup, kernel);
 
   const broadcastState = kernel.spaces.onStateChange;
-  kernel.spaces.onStateChange = (spaceList) => {
-    broadcastState(spaceList);
+  kernel.spaces.onStateChange = (state) => {
+    broadcastState(state);
+    // One window, many spaces: every window gets the same payload, and the
+    // sidebar's highlighted row comes from `focusedSpaceId` instead of a space id
+    // baked into the window at creation time.
+    const payload = {
+      spaces: state?.spaces ?? kernel.spaces.list(),
+      focusedSpaceId: state?.focusedSpaceId ?? kernel.spaces.focusedSpaceId,
+    };
     for (const window of BrowserWindow.getAllWindows()) {
       // `webContents` can already be gone while `isDestroyed()` is still false;
       // sending then throws from inside this handler. The API window from the
       // Agent menu has no preload listening, so it is skipped too.
       if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
-      window.webContents.send("aragon:state", spaceList);
+      window.webContents.send("aragon:state", payload);
     }
   };
 
@@ -94,15 +101,15 @@ async function boot() {
       return { ok: false, error: { message: `refused ${method} from the renderer` } };
     }
     const params = { ...(payload?.params ?? {}) };
-    // Pin the space to the window that sent this. Without it the comment on
-    // `aragon:window` ("one space can never touch another") is false: the payload
-    // carries `spaceId`, so chrome in space 1 could close or navigate space 2.
-    // The policy (and which methods are exempt) lives in space-scope.js, where it
-    // is unit-tested - a window has no way to exercise this from a test.
+    // Pin the space to the one this window is showing. Without it the payload's
+    // `spaceId` is a capability: the chrome of the visible space could close,
+    // navigate or hand off a background one. The policy (and which methods are
+    // exempt) lives in space-scope.js, where it is unit-tested - a window has no
+    // way to exercise this from a test.
     const scope = scopeRendererParams({
       method,
       params,
-      senderSpaceId: kernel.spaces.spaceIdForContents(event.sender),
+      senderSpaceId: kernel.spaces.focusedSpaceIdForContents(event.sender),
     });
     if (!scope.ok) {
       return { ok: false, error: { message: scope.error } };
@@ -120,6 +127,7 @@ async function boot() {
 
   ipcMain.handle("aragon:state", async () => ({
     spaces: kernel.spaces.list(),
+    focusedSpaceId: kernel.spaces.focusedSpaceId,
     version: VERSION,
     engine: `chromium ${process.versions.chrome}`,
     runtimeFile: runtimeFilePath(),

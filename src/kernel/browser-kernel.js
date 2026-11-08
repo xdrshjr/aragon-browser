@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import process from "node:process";
-import { desktopCapturer } from "electron";
+import { BrowserWindow, desktopCapturer } from "electron";
 import {
   AragonError,
   ERROR_CODES,
@@ -70,8 +70,12 @@ export class BrowserKernel {
     this.learningRoot = learningRoot;
     this.transport = null;
     this.spaces = new TaskSpaceManager({
-      onStateChange: (spaceList) => {
-        this.transport?.broadcast({ event: "state", spaces: spaceList });
+      onStateChange: (state) => {
+        this.transport?.broadcast({
+          event: "state",
+          spaces: state.spaces,
+          focusedSpaceId: state.focusedSpaceId,
+        });
       },
     });
     this.methods = this.#buildMethods();
@@ -168,6 +172,10 @@ export class BrowserKernel {
           node: process.versions.node,
           platform: `${process.platform}-${process.arch}`,
           spaces: spaces.list().length,
+          // One window, many spaces. Reported as a number so an agent (and the
+          // smoke test) can prove a new space did not open a window of its own.
+          windows: BrowserWindow.getAllWindows().length,
+          focusedSpaceId: spaces.focusedSpaceId,
           learnedSites,
           packaged: process.env.ARAGON_PACKAGED === "1",
         };
@@ -194,6 +202,10 @@ export class BrowserKernel {
         if (space.owner !== "user" || params.takeOver === true) {
           space.owner = "agent";
         }
+        // Selecting a space is also how an agent says "this is where I work", so it
+        // should be on screen - unless the human is looking at a space of their own,
+        // in which case the sidebar entry (and its agent dot) is enough.
+        spaces.focusForAgent(space);
         spaces.emitChange();
         return spaces.describe(space);
       },
@@ -291,8 +303,11 @@ export class BrowserKernel {
 
       "spaces.focus": async (params) => {
         const space = spaceOf(params);
+        // Switching is in-window now: focus the space, then the OS window. There is
+        // no sibling window to bring forward any more.
+        const descriptor = spaces.setFocusedSpace(space.id);
         space.window?.focus();
-        return spaces.describe(space);
+        return descriptor;
       },
 
       "tabs.create": async (params) => {
@@ -870,8 +885,15 @@ export class BrowserKernel {
         runtimeFile: process.env.ARAGON_RUNTIME_FILE ?? null,
       }),
 
-      "ui.newSpace": async (params) =>
-        spaces.create({ name: params.name, profileId: params.profileId }),
+      "ui.newSpace": async (params) => {
+        const descriptor = await spaces.create({
+          name: params.name,
+          profileId: params.profileId,
+        });
+        // A human clicked "+ new space": show it. (An agent creating a space goes
+        // through the focus policy instead and never steals the view.)
+        return spaces.setFocusedSpace(descriptor.id);
+      },
 
       "ui.newTab": async (params) => {
         const space = spaceOf(params);
@@ -902,8 +924,11 @@ export class BrowserKernel {
 
       "ui.focusSpace": async (params) => {
         const space = spaceOf(params);
+        // The sidebar's entire purpose: show this space in the one window. The OS
+        // window is raised too, because the click came from the human.
+        const descriptor = spaces.setFocusedSpace(space.id);
         space.window?.focus();
-        return spaces.describe(space);
+        return descriptor;
       },
 
       "ui.handOff": async (params) => spaces.handOff(requireSpaceId(params.spaceId)),
@@ -941,6 +966,10 @@ export class BrowserKernel {
             `space ${space.id} has no window to capture`,
           );
         }
+        // The chrome always shows the focused space, so a capture of a background
+        // space has to bring it forward first - otherwise the picture proves
+        // nothing about the space that was asked for.
+        spaces.setFocusedSpace(space.id);
         const image = await space.window.webContents.capturePage();
         return { base64: image.toPNG().toString("base64"), size: image.getSize() };
       },
@@ -960,6 +989,9 @@ export class BrowserKernel {
         // A minimized window has no thumbnail, and `show()` does not un-minimize on
         // Windows - so capture would fail for a perfectly capturable window.
         if (space.window.isMinimized()) space.window.restore();
+        // Only the focused space is composited into the window, so the space has to
+        // be the one on screen or the capture shows a sibling's page.
+        spaces.setFocusedSpace(space.id);
         space.window.show();
         space.window.focus();
         await delay(350);
@@ -1002,6 +1034,8 @@ export class BrowserKernel {
         if (!space.window || space.window.isDestroyed()) {
           throw new AragonError(ERROR_CODES.OPERATION_FAILED, "space has no window");
         }
+        // Geometry and visibility are only meaningful for the space on screen.
+        spaces.setFocusedSpace(space.id);
         const [width, height] = space.window.getContentSize();
         const [outerWidth, outerHeight] = space.window.getSize();
         const tab = space.tabs.find((entry) => entry.id === space.activeTabId);

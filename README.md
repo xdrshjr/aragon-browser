@@ -164,7 +164,9 @@ agent 脚本。fixture 是刻意设计的，每一处都对应一个真实失败
 缺失元素是 transient、对话框记录与恢复、文件上传（含坏路径必须报错）、拖拽、
 剪贴板往返、6 种等待、`waitForNavigation` 能区分「真的导航了」和「什么都没发生」、
 learning 发现/运行/校验、导航后 ref 失效、前进后退、Cookie 隔离、控制权交接、
-`finish()` 硬性要求 `keep`。
+`finish()` 硬性要求 `keep`、**多个 space 仍然只有一个窗口**（`browserVersion().windows === 1`）、
+**新建 space 不动画面而操作时把它放到台前**（隐藏页面收不到真实输入），以及
+**脚本结束后它自己开的页签被清扫掉**（第二次跑 CLI 时 `tabs.list` 里不再有它们）。
 
 `ui-check.js` 另外断言页面视图几何、chrome 渲染、**系统级整窗截图**
 （`webContents.capturePage()` 不合成子 `WebContentsView`，只用它会拍出黑色页面区——
@@ -222,18 +224,43 @@ src/cli/skill-body/SKILL.md      CLI 打印的完整手册（按 schema 渲染�
 - **一个按钮两种含义**：最大化和还原是同一个按钮，动作是「读当前状态再取反」，
   不是让渲染器猜自己该发哪个（`src/main/window-controls.js`）。
 - **窗口标题不能被渲染器改**：`index.html` 的 `<title>` 会把 OS 窗口标题改成
-  `aragon-browser`，于是每个 space 窗口同名，和装好的构建撞名；
-  `page-title-updated` 里 `preventDefault()`，标题始终是 `aragon-browser - <space>`。
+  `aragon-browser`，和装好的构建撞名；`page-title-updated` 里 `preventDefault()`，
+  标题始终由内核写成 `aragon-browser - <space> (#<id>)`，并在侧边栏切换空间时跟着换。
 - **应用菜单默认收起**（`autoHideMenuBar`），按 Alt 唤出；菜单项和快捷键一个都没少。
 
 `test/titlebar.test.mjs` 用假窗口对象测动作映射（`npm test` 里跑），
 `npm run smoke:ui` 在真 Electron 里断言几件肉眼容易骗人的事：
 `getSize() - getContentSize()` 接近 0（证明真的无边框）、页面视图 `y === 112`（证明没压住标题栏），
 以及整窗截图的 `sourceName` 里带 space id、尺寸正好是窗口的 2 倍（证明截到的是**自己这个窗口**，
-不是同名的另一个实例）。
+不是另一个实例）。
 
-space 作用域也在单测里：渲染器的 RPC 只认「发消息的那个窗口」的 space，名字对不上的直接拒绝，
-唯一例外是侧边栏的 `ui.focusSpace`（点另一个 space 就是要聚焦它的窗口）。
+### 一个窗口，多个 space
+
+`TaskSpaceManager` 只有一个 `BrowserWindow`（`#ensureWindow()`），space 是窗口里的一组
+`WebContentsView`；侧边栏切换的是「窗口当前显示哪个 space」，不是「切到另一个窗口」。
+所以第二个 Agent 用 `taskSpace('新名字')` 要空间时，它出现在同一个窗口的左侧列表里。
+
+可见性是算出来的，不是存下来的：当前聚焦 space 的激活页签摆在页面区，其它页签保留原尺寸但
+停在窗口外侧（`layout()`）——不是 `setVisible(false)`。这一点是 smoke 测出来的真坑：Chromium
+对「不可见」的页面直接丢弃真实指针/键盘输入（`document.visibilityState === "hidden"`），
+页签被隐藏后 Agent 点不动它。
+
+焦点策略分两半：Agent **新建/选中** space 时不动画面（只在侧边栏亮 agent 点）；一旦真的要
+**操作**某个 space 的页面，`activeTab()` 会调 `ensureOnStage()` 把它放到台前——隐藏的页面收不到
+真实输入，这是引擎的限制，不是取舍。CLI 在脚本结束时如果是从人手里抢过画面，会把它还回去
+（`__restoreFocus`），人在运行期间自己点了别处则不还。
+
+space 作用域也在单测里：渲染器的 RPC 只认「窗口当前聚焦的那个 space」，名字对不上的直接
+拒绝；例外是侧边栏自己的三个动作（`ui.focusSpace`、`ui.newSpace`、`ui.closeSpace`）。
+
+### 页签生命周期：Agent 开了就要关
+
+一个页签是真实的浏览器状态，Agent 不关它就一直在 space 和侧边栏里。所以有三层：
+`page.close()`（关一个）/ `space.finish({ keep: [] })`（关这个 space 的 Agent 页签）/
+CLI 在脚本结束时自动清扫「本次运行打开的、未被声明的」页签。用 `--keep-tabs`
+（或 `ARAGON_KEEP_TABS=1`）关掉清扫，用 `page.keep()` 保留跨轮复用的那一个，
+`space.handOff()` 则把该 space 的页签整体交给人类，清扫不会再碰。`src/cli/tab-cleanup.js`
+是纯函数，单测直接覆盖「该关谁、该留谁、已经被关掉的」三种情形。
 
 ---
 
@@ -295,11 +322,12 @@ agent 扫 skills/*/SKILL.md 的 frontmatter
 ```
 spaces   taskSpace / createTaskSpace / claimTaskSpace / listTaskSpaces
          useTaskSpace / takeOverTaskSpace / closeTaskSpace
-         space.pages / tabs / newPage / page(label) / handOff / finish / waitForControl / learn
+         space.pages / tabs / newPage / page(label) / handOff / finish / close / waitForControl / learn
 observe  page.snapshot / info / frames / screenshot / events / dialogs
 act      page.click / doubleClick / rightClick / fill / type / press / hover
          page.scroll / drag / upload / clipboard / readClipboard
          page.goto / goBack / goForward / reload
+         page.close / page.keep          ← 页签生命周期（用完就关）
 wait     page.waitFor / waitForText / waitForExpression / waitForLoad
          page.waitForNetworkIdle / waitForDialog
 dialogs  page.answerDialog / setDialogPolicy / dialogs
@@ -318,8 +346,6 @@ Targets: `@N`、`ref=N`、`css:<sel>`、`loc=role:<role>[name=…]`、`text=…`
 ## 与 ego lite 的差距（现状，不是待办）
 
 - **没有内核级快照定制**：受限于 Chromium 暴露的 AX 树，质量上限低于 ego lite。
-- **没有多 Space 单窗口切换**：每个 Space 是独立 `BrowserWindow`。并行是真的
-  （各有进程、各有 partition），但没有一个窗口里切换 Space 的 UI。
 - **没有 Downloads / 扩展 / 书签 / PDF**。
 - **没有代码签名与自动更新**：安装包会被 SmartScreen 拦一次。
 - **Linux 未验证**。
@@ -339,4 +365,6 @@ Targets: `@N`、`ref=N`、`css:<sel>`、`loc=role:<role>[name=…]`、`text=…`
 - `taskSpace(name)` **会切换全局选中空间**，后面的裸 helper（`snapshot`、`listTabs`、
   `runSiteTool`）会跟着变。多空间脚本里要么用完切回来，要么一直用 `space.xxx` 形式。
 - 未做：isolated world（locator 求值仍在同源世界）、Downloads、扩展、书签、PDF、
-  代码签名、自动更新、多 Space 单窗口切换、Linux 验证。
+  代码签名、自动更新、Linux 验证。
+- 空间共享一个窗口，所以窗口级截图（`captureWindow` / `captureChrome`）会先把该空间
+  切到前面来——只有当前聚焦空间的页签会被合成进窗口。

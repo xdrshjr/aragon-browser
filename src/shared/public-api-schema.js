@@ -48,7 +48,8 @@ export const PUBLIC_API_SCHEMA = [
     name: "createTaskSpace",
     signature: "await createTaskSpace(name, profileId?)",
     area: "spaces",
-    summary: "Create a space. profileId comes from listProfiles().",
+    summary:
+      "Create a space. It appears in the window's sidebar (spaces share one window). profileId comes from listProfiles().",
   },
   {
     name: "claimTaskSpace",
@@ -72,7 +73,7 @@ export const PUBLIC_API_SCHEMA = [
     name: "closeTaskSpace",
     signature: "await closeTaskSpace(id?)",
     area: "spaces",
-    summary: "Close a space and its window.",
+    summary: "Close a space and its tabs. The window stays open: every space shares it.",
   },
 
   // --- TaskSpace methods ---------------------------------------------------
@@ -112,8 +113,15 @@ export const PUBLIC_API_SCHEMA = [
     signature: "await space.finish({ keep })",
     area: "space-methods",
     summary:
-      'keep is required: "all" or an array of Page labels. Closes agent tabs, never a tab the user opened.',
+      'keep is required: "all" or an array of Page labels. Closes agent tabs, never a tab the user opened. The space stays in the sidebar unless it is empty.',
     options: { keep: "keep" },
+  },
+  {
+    name: "TaskSpace.close",
+    signature: "await space.close()",
+    area: "space-methods",
+    summary:
+      "Close the space and its tabs. Spaces share one window, so the window stays open for the others.",
   },
   {
     name: "TaskSpace.waitForControl",
@@ -293,6 +301,20 @@ export const PUBLIC_API_SCHEMA = [
     signature: "await page.reload()",
     area: "act",
     summary: "Reload the current document.",
+  },
+  {
+    name: "Page.close",
+    signature: "await page.close()",
+    area: "act",
+    summary:
+      "Close this page's tab. Call it when the task is done with a page: an unclosed tab stays in the space (and in the sidebar) forever.",
+  },
+  {
+    name: "Page.keep",
+    signature: "page.keep()",
+    area: "act",
+    summary:
+      "Keep this page when the script ends. The CLI closes tabs the script opened; call keep() on a page the next round will act on.",
   },
 
   // --- waiting -------------------------------------------------------------

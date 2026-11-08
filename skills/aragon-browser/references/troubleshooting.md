@@ -122,14 +122,47 @@ await space.waitForControl({ timeout: 300000 }); // wait for the handoff
 await takeOverTaskSpace(space.id);               // or take it back deliberately
 ```
 
+## The sidebar keeps filling with tabs
+
+Every tab an agent opens is real browser state: it stays in the space and in the
+left rail until something closes it. A script that opens a page per run therefore
+leaves one dead tab per run behind.
+
+The CLI closes the tabs **this run** opened when it exits, and says so:
+
+```
+aragon-browser: closed 2 tab(s) this script left open (p3, p4); use page.close() ...
+```
+
+- Close while you work: `await page.close()` when a page is no longer needed.
+- Close the whole task's tabs: `await space.finish({ keep: [] })`.
+- Keep a tab on purpose (the next round acts on it): `page.keep()`, or run the CLI
+  with `--keep-tabs` / `ARAGON_KEEP_TABS=1` to disable the sweep entirely.
+- Tabs an earlier run opened are never swept (this run did not open them), and a
+  space the user owns is never touched - use `space.close()` for those.
+
 ## Another agent session seems to interfere
 
-Each space has its own session partition, so cookies and storage are isolated.
-What is **shared** by design is the running browser process (one runtime socket).
-Use distinct space names per task:
+Spaces share one browser window and one runtime socket, but each space has its own
+session partition, so cookies and storage are isolated. A second agent asking for a
+space gets a row in the same window's rail - not a second window - and it does not
+steal the view from a space the human is using. Use distinct space names per task:
 
 ```js
 const space = await taskSpace(`task-${Date.now()}`);
+```
+
+## A second agent opened a whole new window
+
+It should not, and it no longer does: spaces live in one `BrowserWindow` and the
+rail switches between them. If you see a second window, it is a different app
+instance (the single-instance lock only covers one `userData` directory) - check
+`aragon-browser status` for the pid, and `browserVersion().windows` for how many
+windows that runtime owns.
+
+```js
+const v = await browserVersion();
+cliLog(`${v.spaces} spaces in ${v.windows} window(s), showing space ${v.focusedSpaceId}`);
 ```
 
 ## Packaging-only failures

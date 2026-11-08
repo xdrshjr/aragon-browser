@@ -126,4 +126,54 @@ if (full.format !== "jpeg" || full.bytes < 1000) {
 }
 cliLog("PASS history and screenshot options work through the UI-facing surface");
 
+// --- the rail switches spaces INSIDE this window --------------------------
+// The whole point of the single-window model: a second space is another entry in
+// the left rail, not another OS window. Prove it with the two things a person can
+// actually see - the OS window title and the pixels - and prove it is still ONE
+// window while doing so.
+// Select a space the way an agent does (claimTaskSpace): the space comes on screen
+// through the manager's focus policy, which ends in the same `setFocusedSpace()`
+// call the rail's click reaches via `ui.focusSpace`. A script cannot send `ui.*`
+// itself - that surface belongs to the chrome - so this is the closest an agent
+// gets to clicking the rail.
+const other = await taskSpace("ui-check-second");
+const otherPage = await other.newPage(`${FIXTURE_URL}submit`);
+await otherPage.waitForLoad();
+await claimTaskSpace(other.id);
+const afterSwitch = await browserVersion();
+if (afterSwitch.windows !== 1) {
+  throw new Error(`switching spaces opened ${afterSwitch.windows} windows`);
+}
+if (afterSwitch.focusedSpaceId !== other.id) {
+  throw new Error(
+    `the window is showing space ${afterSwitch.focusedSpaceId}, expected ${other.id}`,
+  );
+}
+const otherShot = await other.captureWindow();
+if (!otherShot.sourceName.includes("ui-check-second")) {
+  throw new Error(`the window title did not follow the switch: "${otherShot.sourceName}"`);
+}
+cliLog(
+  `PASS the rail switched space ${other.id} into the same window ("${otherShot.sourceName}")`,
+);
+// The page area must now show the second space's page (the submitted document,
+// not the fixture form), which is only true if the views were swapped.
+const otherBody = await otherPage.evaluate("document.body.innerText.trim()");
+if (!/Submitted/i.test(otherBody)) {
+  throw new Error(`space ${other.id} is not showing its own page: "${otherBody}"`);
+}
+cliLog("PASS the page area now shows the other space's document");
+
+// Switching back must restore the first space's tab, and its tab strip.
+await claimTaskSpace(space.id);
+const backShot = await space.captureChrome();
+if (Buffer.from(backShot.base64, "base64").length < 5000) {
+  throw new Error("chrome capture after switching back is suspiciously small");
+}
+const backTabs = await space.tabs();
+if (!backTabs.some((tab) => tab.active)) {
+  throw new Error("switching back left the space without an active tab");
+}
+cliLog("PASS switching back restored the first space");
+
 cliLog("DONE ui-check");

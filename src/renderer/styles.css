@@ -269,6 +269,26 @@ body {
   font-size: 10px;
 }
 
+/* One window hosts every space, so the rail is the only way to drop one. The ✕
+   stays invisible until the row is hovered or current: a destructive control
+   should not compete with "switch to this space" while you are reading the list. */
+#space-list li .close {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+#space-list li:hover .close,
+#space-list li.current .close {
+  opacity: 1;
+}
+
+#space-list li .close:hover {
+  color: var(--danger);
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.25;

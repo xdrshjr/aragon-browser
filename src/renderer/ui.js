@@ -19,11 +19,19 @@ const els = {
   runtime: document.getElementById("runtime"),
 };
 
-const spaceId = window.aragon?.spaceId ?? null;
 let spaces = [];
+// One window, many spaces: the rail switches which space the window shows. This
+// id is the window's focused space, pushed by the main process - a window is no
+// longer pinned to a single space at creation time.
+let focusedSpaceId = null;
 
 function currentSpace() {
-  return spaces.find((space) => space.id === spaceId) ?? null;
+  return (
+    spaces.find((space) => space.id === focusedSpaceId) ??
+    spaces.find((space) => space.focused) ??
+    spaces[0] ??
+    null
+  );
 }
 
 function setStatus(text, isError = false) {
@@ -32,7 +40,15 @@ function setStatus(text, isError = false) {
 }
 
 async function rpc(method, params = {}) {
-  const response = await window.aragon.rpc(method, { spaceId, ...params });
+  // The main process refuses a spaceId that disagrees with the focused space, so
+  // always send the one on screen - but only when there is one. Before the first
+  // state push `focusedSpaceId` is null, and `spaceId: null` is not "unset" on the
+  // other side: it would be read as a foreign space and refused.
+  const payload =
+    params.spaceId === undefined && Number.isInteger(focusedSpaceId)
+      ? { spaceId: focusedSpaceId, ...params }
+      : { ...params };
+  const response = await window.aragon.rpc(method, payload);
   if (!response?.ok) {
     setStatus(response?.error?.message ?? "rpc failed", true);
     return null;
@@ -46,15 +62,23 @@ function renderSidebar() {
     const li = document.createElement("li");
     li.dataset.owner = space.owner;
     li.dataset.state = space.agentState;
-    if (space.id === spaceId) li.classList.add("current");
+    if (space.id === focusedSpaceId) li.classList.add("current");
     li.innerHTML = `
       <span class="dot"></span>
       <span class="name"></span>
-      <span class="tabs">${space.tabs.length}</span>`;
+      <span class="tabs">${space.tabs.length}</span>
+      <span class="close" title="close space">✕</span>`;
     li.querySelector(".name").textContent = space.name;
     li.title = `space ${space.id} · ${space.owner} · ${space.agentState}`;
-    li.addEventListener("click", () => {
-      if (space.id === spaceId) return;
+    li.addEventListener("click", (event) => {
+      // The ✕ is the only destructive control in the rail, so it must not also
+      // count as "switch to this space".
+      if (event.target.classList.contains("close")) {
+        void rpc("ui.closeSpace", { spaceId: space.id });
+        return;
+      }
+      if (space.id === focusedSpaceId) return;
+      // In-window switch. There is no sibling window to focus.
       void rpc("ui.focusSpace", { spaceId: space.id });
     });
     els.spaceList.append(li);
@@ -98,10 +122,33 @@ function renderChrome() {
   }
 }
 
-function applyState(nextSpaces) {
-  if (Array.isArray(nextSpaces)) spaces = nextSpaces;
+function applyState(next) {
+  // Two shapes are accepted on purpose: the initial `aragon:state` IPC reply and
+  // the pushed update both carry `{ spaces, focusedSpaceId }`, while an older
+  // build only pushed the array. Reading both keeps a stale preload from blanking
+  // the window.
+  if (Array.isArray(next)) {
+    spaces = next;
+  } else if (next && typeof next === "object") {
+    if (Array.isArray(next.spaces)) spaces = next.spaces;
+    if (Number.isInteger(next.focusedSpaceId)) focusedSpaceId = next.focusedSpaceId;
+  }
+  if (focusedSpaceId === null || !spaces.some((space) => space.id === focusedSpaceId)) {
+    focusedSpaceId = spaces.find((space) => space.focused)?.id ?? spaces[0]?.id ?? null;
+  }
   renderSidebar();
   renderChrome();
+  // Keep the "showing …" line honest as the focused space changes, but never
+  // overwrite a real status message (a navigation result, an error).
+  if (els.status.textContent === "" || els.status.textContent.startsWith("showing ")) {
+    setStatus(describeFocused());
+  }
+}
+
+function describeFocused() {
+  const space = currentSpace();
+  if (!space) return spaces.length === 0 ? "no space open" : "ready";
+  return `showing space ${space.id} · ${space.name} · ${spaces.length} in the rail`;
 }
 
 async function navigate() {
@@ -194,8 +241,8 @@ window.aragon.onWindowState((state) => applyWindowState(state));
 window.aragon.onState((next) => applyState(next));
 
 const initial = await window.aragon.getState();
+applyState(initial);
 spaceIdLabel(initial);
-applyState(initial.spaces);
 // A window can open already maximized (or be restored that way); ask once so the
 // button does not show the wrong glyph until something resizes. A failed read must
 // not be applied: `undefined` would silently claim "not maximized".
@@ -205,5 +252,5 @@ if (initialWindow?.ok) applyWindowState(initialWindow.result);
 function spaceIdLabel(state) {
   els.engine.textContent = `nano · ${state.engine ?? ""}`;
   els.runtime.textContent = state.runtimeFile ?? "";
-  setStatus(`space ${spaceId ?? "?"} ready · window ${window.aragon.spaceId}`);
+  setStatus(describeFocused());
 }

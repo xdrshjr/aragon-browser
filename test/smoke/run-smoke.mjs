@@ -109,24 +109,33 @@ async function main() {
     log(`browser published port ${coordinates.port} (pid ${coordinates.pid})`);
 
     const scriptName = process.argv[2] || "agent-script.js";
-    const template = fs.readFileSync(path.join(__dirname, scriptName), "utf8");
-    const source = template
-      .replaceAll("FIXTURE_URL", JSON.stringify(fixture.baseUrl))
-      .replaceAll("UPLOAD_FILE", JSON.stringify(fixture.uploadFile));
-    const result = await runCli(source);
+    // The sweep happens when the CLI exits, so proving it needs more than one
+    // process: phase 1 leaves tabs open, phase 2 checks they are gone and opens one
+    // kept + one unkept tab, phase 3 checks which of the two survived.
+    const extraScripts =
+      scriptName === "agent-script.js" ? ["sweep-check.js", "sweep-verify.js"] : [];
+    let passes = 0;
 
-    if (result.code !== 0) {
-      log(`\nFAIL cli exited ${result.code}`);
-      log(appOut.join("").slice(-4000));
-      process.exitCode = 1;
-      return;
+    for (const name of [scriptName, ...extraScripts]) {
+      const template = fs.readFileSync(path.join(__dirname, name), "utf8");
+      const source = template
+        .replaceAll("FIXTURE_URL", JSON.stringify(fixture.baseUrl))
+        .replaceAll("UPLOAD_FILE", JSON.stringify(fixture.uploadFile));
+      const result = await runCli(source);
+
+      if (result.code !== 0) {
+        log(`\nFAIL ${name}: cli exited ${result.code}`);
+        log(appOut.join("").slice(-4000));
+        process.exitCode = 1;
+        return;
+      }
+      if (!/^DONE /m.test(result.stdout)) {
+        log(`\nFAIL ${name} finished without reaching the DONE marker`);
+        process.exitCode = 1;
+        return;
+      }
+      passes += result.stdout.split("\n").filter((line) => line.startsWith("PASS")).length;
     }
-    if (!/^DONE /m.test(result.stdout)) {
-      log("\nFAIL script finished without reaching the DONE marker");
-      process.exitCode = 1;
-      return;
-    }
-    const passes = result.stdout.split("\n").filter((line) => line.startsWith("PASS")).length;
     log(`\nSMOKE OK - ${passes} checks passed against the real browser`);
   } finally {
     await cleanup();
