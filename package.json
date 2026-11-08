@@ -1,0 +1,37 @@
+{
+  "name": "aragon-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A nano browser that AI agents drive through a patched engine boundary",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "aragon-browser contributors"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "aragon-browser": "./bin/aragon-browser.cjs"
+  },
+  "main": "./src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "cli": "node bin/aragon-browser.cjs",
+    "icon": "node scripts/make-icon.mjs build/icon.png",
+    "build:cli": "node scripts/build-cli.mjs",
+    "build": "npm run icon && npm run build:cli",
+    "dist": "npm run build && electron-builder --win --x64",
+    "dist:portable": "npm run build && electron-builder --win portable --x64",
+    "test": "node --test \"test/*.test.mjs\"",
+    "smoke": "node test/smoke/run-smoke.mjs",
+    "smoke:ui": "node test/smoke/run-smoke.mjs ui-check.js",
+    "smoke:packaged": "node test/smoke/run-packaged.mjs",
+    "validate:skills": "node bin/aragon-browser.cjs learn"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2"
+  }
+}

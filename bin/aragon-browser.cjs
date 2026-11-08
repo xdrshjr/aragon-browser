@@ -1,0 +1,1700 @@
+#!/usr/bin/env node
+// aragon-browser CLI - bundled from src/cli/index.js. Do not edit; rebuild with `npm run build:cli`.
+const __importMetaUrl = require("node:url").pathToFileURL(__filename).href;
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
+// src/shared/paths.js
+function existing(candidates, marker) {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const target = marker ? import_node_path3.default.join(candidate, marker) : candidate;
+      if (import_node_fs3.default.existsSync(target)) return candidate;
+    } catch {
+    }
+  }
+  return null;
+}
+function skillBodyDir() {
+  const found = existing(
+    [
+      process.env.ARAGON_SKILL_DIR,
+      import_node_path3.default.join(here, "skill-body"),
+      import_node_path3.default.join(here, "..", "src", "cli", "skill-body"),
+      process.env.ARAGON_RESOURCES_DIR ? import_node_path3.default.join(process.env.ARAGON_RESOURCES_DIR, "skill-body") : null,
+      import_node_path3.default.join(here, "..", "..", "src", "cli", "skill-body")
+    ],
+    "SKILL.md"
+  );
+  if (!found) {
+    throw new Error(
+      "aragon-browser: could not find skill-body/SKILL.md; reinstall or set ARAGON_SKILL_DIR"
+    );
+  }
+  return found;
+}
+function workspaceRoot() {
+  if (process.env.ARAGON_AGENT_WORKSPACE) {
+    return import_node_path3.default.resolve(process.env.ARAGON_AGENT_WORKSPACE);
+  }
+  const skillDirName = import_node_path3.default.join("skills", "aragon-browser");
+  const found = existing(
+    [
+      import_node_path3.default.join(here, "..", "..", skillDirName),
+      import_node_path3.default.join(here, "..", skillDirName),
+      process.resourcesPath ? import_node_path3.default.join(process.resourcesPath, skillDirName) : null,
+      import_node_path3.default.join(here, "..", ".."),
+      import_node_path3.default.join(here, "..", "..", "..")
+    ],
+    import_node_path3.default.join("learnings")
+  );
+  return found ?? import_node_path3.default.join(here, "..", "..");
+}
+var import_node_fs3, import_node_path3, import_node_url, __dirname, here;
+var init_paths = __esm({
+  "src/shared/paths.js"() {
+    import_node_fs3 = __toESM(require("node:fs"), 1);
+    import_node_path3 = __toESM(require("node:path"), 1);
+    import_node_url = require("node:url");
+    __dirname = import_node_path3.default.dirname((0, import_node_url.fileURLToPath)(__importMetaUrl));
+    here = (() => {
+      try {
+        return __dirname;
+      } catch {
+        return ".";
+      }
+    })();
+  }
+});
+
+// src/kernel/learning/manifest.js
+function learningsRoot(workspace = agentWorkspace()) {
+  return import_node_path4.default.join(workspace, "learnings");
+}
+function agentWorkspace() {
+  const override = process.env.ARAGON_AGENT_WORKSPACE;
+  if (override && override.trim()) return import_node_path4.default.resolve(override.trim());
+  return workspaceRoot();
+}
+async function pathExists(target) {
+  try {
+    await import_node_fs4.default.promises.stat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function iterLearningDirs(root) {
+  let entries;
+  try {
+    entries = await import_node_fs4.default.promises.readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith("_")).map((entry) => import_node_path4.default.join(root, entry.name)).sort();
+}
+var import_node_fs4, import_node_path4;
+var init_manifest = __esm({
+  "src/kernel/learning/manifest.js"() {
+    import_node_fs4 = __toESM(require("node:fs"), 1);
+    import_node_path4 = __toESM(require("node:path"), 1);
+    init_paths();
+  }
+});
+
+// src/kernel/learning/validate.js
+var validate_exports = {};
+__export(validate_exports, {
+  isBrowserToolPath: () => isBrowserToolPath,
+  isNodeToolPath: () => isNodeToolPath,
+  isNotePath: () => isNotePath,
+  isSafeRelativePath: () => isSafeRelativePath,
+  isSafeToolName: () => isSafeToolName,
+  isValidDomain: () => isValidDomain,
+  validateLearning: () => validateLearning,
+  validateLearnings: () => validateLearnings,
+  validateSiteSkills: () => validateSiteSkills
+});
+function isValidDomain(pattern) {
+  if (typeof pattern !== "string" || !pattern) return false;
+  if (pattern.includes("://") || pattern.includes("/") || pattern.startsWith(".") || pattern.endsWith(".")) {
+    return false;
+  }
+  if (pattern.includes("*")) {
+    return pattern.startsWith("*.") && pattern.indexOf("*") === pattern.lastIndexOf("*") && pattern.length > 2;
+  }
+  return true;
+}
+function isSafeToolName(name) {
+  return typeof name === "string" && Boolean(name) && !name.includes("/") && !name.includes("\\") && name !== "." && name !== ".." && !name.includes("..");
+}
+function isSafeRelativePath(value) {
+  if (typeof value !== "string" || !value || value.includes("\\") || import_node_path5.default.isAbsolute(value)) {
+    return false;
+  }
+  return value.split("/").every((part) => part && part !== "." && part !== "..");
+}
+function isNotePath(value) {
+  const parts = isSafeRelativePath(value) ? value.split("/") : [];
+  return parts.length === 2 && parts[0] === "notes" && parts[1].endsWith(".md");
+}
+function isNodeToolPath(value) {
+  const parts = isSafeRelativePath(value) ? value.split("/") : [];
+  return parts.length === 2 && parts[0] === "tools" && parts[1].endsWith(".js");
+}
+function isBrowserToolPath(value) {
+  const parts = isSafeRelativePath(value) ? value.split("/") : [];
+  return parts.length === 2 && parts[0] === "browser-tools" && parts[1].endsWith(".js");
+}
+function asStringList(manifest, key, errors, siteId) {
+  const value = manifest[key] || [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && item.trim())) {
+    errors.push(`${siteId}: ${key} must be a list of non-empty strings`);
+    return [];
+  }
+  return value;
+}
+function validateValueSchema(prefix, schema, errors, requireRequired, typeLabel) {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    errors.push(`${prefix}: schema must be an object`);
+    return;
+  }
+  if (!TOOL_VALUE_TYPES.has(schema.type)) {
+    errors.push(`${prefix}: invalid ${typeLabel} type ${JSON.stringify(schema.type)}`);
+  }
+  if (requireRequired && typeof schema.required !== "boolean") {
+    errors.push(`${prefix}: required must be a boolean`);
+  }
+  if (typeof schema.description !== "string" || !schema.description.trim()) {
+    errors.push(`${prefix}: description must be a non-empty string`);
+  }
+}
+function validateToolSchema(siteId, key, toolName, schema, errors) {
+  const prefix = `${siteId}: ${key}.${toolName}`;
+  if (!isSafeToolName(toolName)) {
+    errors.push(
+      `${siteId}: ${key} contains invalid tool name ${JSON.stringify(toolName)}`
+    );
+    return;
+  }
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    errors.push(`${prefix}: schema must be an object`);
+    return;
+  }
+  if (typeof schema.description !== "string" || !schema.description.trim()) {
+    errors.push(`${prefix}: description must be a non-empty string`);
+  }
+  if (key === "nodeTools") {
+    if (!isNodeToolPath(schema.path)) {
+      errors.push(`${prefix}: path must be a relative tools/*.js path`);
+    }
+    if (typeof schema.callable !== "string" || !schema.callable.trim()) {
+      errors.push(`${prefix}: callable must be a non-empty string`);
+    }
+  } else if (!isBrowserToolPath(schema.path)) {
+    errors.push(`${prefix}: path must be a relative browser-tools/*.js path`);
+  }
+  if (!schema.args || typeof schema.args !== "object" || Array.isArray(schema.args)) {
+    errors.push(`${prefix}: args must be an object`);
+  } else {
+    for (const [argName, argSchema] of Object.entries(schema.args)) {
+      if (typeof argName !== "string" || !argName.trim()) {
+        errors.push(
+          `${prefix}: args contains invalid argument name ${JSON.stringify(argName)}`
+        );
+        continue;
+      }
+      validateValueSchema(`${prefix}.args.${argName}`, argSchema, errors, true, "arg");
+    }
+  }
+  if (!schema.returns || typeof schema.returns !== "object" || Array.isArray(schema.returns)) {
+    errors.push(`${prefix}: returns must be an object`);
+  } else {
+    validateValueSchema(`${prefix}.returns`, schema.returns, errors, false, "return");
+  }
+}
+function validateToolMap(manifest, key, errors, siteId) {
+  const value = manifest[key] || {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    errors.push(`${siteId}: ${key} must be an object keyed by tool name`);
+    return {};
+  }
+  for (const [toolName, schema] of Object.entries(value)) {
+    validateToolSchema(siteId, key, toolName, schema, errors);
+  }
+  return value;
+}
+async function rejectTemporaryRefs(siteDir, relativePath, prefix, errors) {
+  let text;
+  try {
+    text = await import_node_fs5.default.promises.readFile(import_node_path5.default.join(siteDir, relativePath), "utf8");
+  } catch {
+    return;
+  }
+  if (TEMP_REF_RE.test(text)) {
+    errors.push(
+      `${prefix}: contains temporary snapshot ref; use stable locators instead`
+    );
+  }
+}
+async function validateLearning(siteDir) {
+  const errors = [];
+  const siteId = siteDir.split(/[\\/]/).at(-1);
+  let manifest;
+  try {
+    manifest = JSON.parse(
+      await import_node_fs5.default.promises.readFile(import_node_path5.default.join(siteDir, "manifest.json"), "utf8")
+    );
+  } catch (error) {
+    return [`${siteId}: invalid or missing manifest.json: ${error.message}`];
+  }
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    return [`${siteId}: manifest.json must contain a JSON object`];
+  }
+  if (manifest.id !== siteId) {
+    errors.push(`${siteId}: manifest id must match directory name`);
+  }
+  if (typeof manifest.name !== "string" || !manifest.name.trim()) {
+    errors.push(`${siteId}: name must be a non-empty string`);
+  }
+  const domains = asStringList(manifest, "domains", errors, siteId);
+  if (domains.length === 0) errors.push(`${siteId}: domains must not be empty`);
+  for (const domain of domains) {
+    if (!isValidDomain(domain)) {
+      errors.push(`${siteId}: invalid domain ${JSON.stringify(domain)}`);
+    }
+  }
+  for (const note of asStringList(manifest, "notes", errors, siteId)) {
+    if (!isNotePath(note)) {
+      errors.push(
+        `${siteId}: notes must point to notes/*.md: ${JSON.stringify(note)}`
+      );
+      continue;
+    }
+    if (!await pathExists(import_node_path5.default.join(siteDir, note))) {
+      errors.push(`${siteId}: missing note ${JSON.stringify(note)}`);
+    }
+    await rejectTemporaryRefs(siteDir, note, `${siteId}: note ${JSON.stringify(note)}`, errors);
+  }
+  const nodeTools = validateToolMap(manifest, "nodeTools", errors, siteId);
+  for (const [toolName, schema] of Object.entries(nodeTools)) {
+    if (!schema || typeof schema !== "object" || !isNodeToolPath(schema.path)) continue;
+    if (!await pathExists(import_node_path5.default.join(siteDir, schema.path))) {
+      errors.push(
+        `${siteId}: missing Node tool file ${JSON.stringify(schema.path)} for tool ${JSON.stringify(toolName)}`
+      );
+      continue;
+    }
+    await rejectTemporaryRefs(
+      siteDir,
+      schema.path,
+      `${siteId}: Node tool ${JSON.stringify(toolName)}`,
+      errors
+    );
+    try {
+      const module2 = await import(`${(0, import_node_url2.pathToFileURL)(import_node_path5.default.join(siteDir, schema.path)).href}?validate=${Date.now()}`);
+      if (typeof schema.callable === "string" && typeof module2[schema.callable] !== "function") {
+        errors.push(
+          `${siteId}: missing Node callable ${JSON.stringify(schema.callable)} for tool ${JSON.stringify(toolName)}`
+        );
+      }
+    } catch (error) {
+      errors.push(
+        `${siteId}: cannot import Node tool ${JSON.stringify(schema.path)}: ${error.message}`
+      );
+    }
+  }
+  const browserTools = validateToolMap(manifest, "browserTools", errors, siteId);
+  for (const [toolName, schema] of Object.entries(browserTools)) {
+    if (!schema || typeof schema !== "object" || !isBrowserToolPath(schema.path)) {
+      continue;
+    }
+    if (!await pathExists(import_node_path5.default.join(siteDir, schema.path))) {
+      errors.push(
+        `${siteId}: missing browser tool file ${JSON.stringify(schema.path)} for tool ${JSON.stringify(toolName)}`
+      );
+    }
+    await rejectTemporaryRefs(
+      siteDir,
+      schema.path,
+      `${siteId}: browser tool ${JSON.stringify(toolName)}`,
+      errors
+    );
+  }
+  return errors;
+}
+async function validateLearnings(root = learningsRoot()) {
+  const errors = [];
+  for (const siteDir of await iterLearningDirs(root)) {
+    errors.push(...await validateLearning(siteDir));
+  }
+  return errors;
+}
+var import_node_path5, import_node_url2, import_node_fs5, TOOL_VALUE_TYPES, TEMP_REF_RE, validateSiteSkills;
+var init_validate = __esm({
+  "src/kernel/learning/validate.js"() {
+    import_node_path5 = __toESM(require("node:path"), 1);
+    import_node_url2 = require("node:url");
+    import_node_fs5 = __toESM(require("node:fs"), 1);
+    init_manifest();
+    TOOL_VALUE_TYPES = /* @__PURE__ */ new Set([
+      "string",
+      "number",
+      "integer",
+      "boolean",
+      "array",
+      "object"
+    ]);
+    TEMP_REF_RE = /(?:@\d+\b|\bref=\d+\b)/;
+    validateSiteSkills = validateLearnings;
+  }
+});
+
+// src/cli/index.js
+var import_node_fs6 = __toESM(require("node:fs"), 1);
+var import_node_path6 = __toESM(require("node:path"), 1);
+var import_node_process = __toESM(require("node:process"), 1);
+var import_node_url3 = require("node:url");
+
+// src/shared/protocol.js
+var import_node_os = __toESM(require("node:os"), 1);
+var import_node_path = __toESM(require("node:path"), 1);
+var ERROR_CODES = {
+  BROWSER_UNAVAILABLE: "EGO_BROWSER_UNAVAILABLE",
+  CDP_CHANNEL_UNAVAILABLE: "EGO_CDP_CHANNEL_UNAVAILABLE",
+  CDP_SEND_FAILED: "EGO_CDP_SEND_FAILED",
+  INVALID_ARGUMENT: "EGO_INVALID_ARGUMENT",
+  OPERATION_FAILED: "EGO_OPERATION_FAILED",
+  SNAPSHOT_FAILED: "EGO_SNAPSHOT_FAILED",
+  TASK_SPACE_INACTIVE: "EGO_TASK_SPACE_INACTIVE",
+  TASK_SPACE_NOT_FOUND: "EGO_TASK_SPACE_NOT_FOUND",
+  TASK_SPACE_NOT_SELECTED: "EGO_TASK_SPACE_NOT_SELECTED",
+  TASK_SPACE_USER_IN_CONTROL: "EGO_TASK_SPACE_USER_IN_CONTROL",
+  WEB_CONTENTS_UNAVAILABLE: "EGO_WEB_CONTENTS_UNAVAILABLE",
+  REF_STALE: "ARAGON_REF_STALE",
+  REF_NOT_FOUND: "ARAGON_REF_NOT_FOUND",
+  RUNTIME_NOT_RUNNING: "ARAGON_RUNTIME_NOT_RUNNING",
+  RUNTIME_STALE: "ARAGON_RUNTIME_STALE",
+  UNAUTHORIZED: "ARAGON_UNAUTHORIZED",
+  NO_SUCH_METHOD: "ARAGON_NO_SUCH_METHOD"
+};
+var AragonError = class extends Error {
+  constructor(code, message, cause) {
+    super(message ?? code);
+    this.name = "AragonError";
+    this.error_code = code;
+    if (cause) this.cause = cause;
+  }
+};
+function runtimeFilePath() {
+  const override = process.env.ARAGON_RUNTIME_FILE;
+  if (override && override.trim()) return import_node_path.default.resolve(override.trim());
+  return import_node_path.default.join(import_node_os.default.tmpdir(), "aragon-browser", "runtime.json");
+}
+
+// src/cli/transport-client.js
+var import_node_net = __toESM(require("node:net"), 1);
+
+// src/kernel/runtime-transport.js
+var import_node_fs = __toESM(require("node:fs"), 1);
+var MAX_LINE_BYTES = 32 * 1024 * 1024;
+function readRuntimeCoordinates(runtimeFile) {
+  let raw;
+  try {
+    raw = import_node_fs.default.readFileSync(runtimeFile, "utf8");
+  } catch {
+    throw new AragonError(
+      ERROR_CODES.RUNTIME_NOT_RUNNING,
+      "aragon-browser is not running: start it with `npm start` (or the packaged app), then retry"
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new AragonError(
+      ERROR_CODES.RUNTIME_STALE,
+      "runtime coordinates are unreadable; restart aragon-browser"
+    );
+  }
+  if (!parsed?.port || !parsed?.token) {
+    throw new AragonError(
+      ERROR_CODES.RUNTIME_STALE,
+      "runtime coordinates are incomplete; restart aragon-browser"
+    );
+  }
+  return parsed;
+}
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+// src/cli/transport-client.js
+var DEFAULT_TIMEOUT_MS = 3e4;
+var RuntimeClient = class {
+  constructor({ runtimeFile = runtimeFilePath(), timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+    this.runtimeFile = runtimeFile;
+    this.timeoutMs = timeoutMs;
+    this.socket = null;
+    this.pending = /* @__PURE__ */ new Map();
+    this.nextId = 1;
+    this.buffer = "";
+    this.onEvent = null;
+    this.info = null;
+  }
+  async connect() {
+    const coordinates = readRuntimeCoordinates(this.runtimeFile);
+    if (!isProcessAlive(coordinates.pid)) {
+      throw new AragonError(
+        ERROR_CODES.RUNTIME_STALE,
+        `aragon-browser (pid ${coordinates.pid}) is gone but left coordinates behind; start it again`
+      );
+    }
+    this.info = coordinates;
+    const handshake = this.handshake;
+    await new Promise((resolve, reject) => {
+      const socket = import_node_net.default.createConnection({
+        port: coordinates.port,
+        host: "127.0.0.1"
+      });
+      this.socket = socket;
+      socket.setEncoding("utf8");
+      socket.once("connect", () => {
+        socket.write(
+          `${JSON.stringify({ type: "hello", token: coordinates.token })}
+`
+        );
+        resolve();
+      });
+      socket.on("error", (error) => {
+        this.#failAll(error);
+        this.handshakeReject?.(error);
+        reject(error);
+      });
+      socket.on("close", () => {
+        this.#failAll(
+          new AragonError(ERROR_CODES.RUNTIME_STALE, "runtime connection closed")
+        );
+      });
+      socket.on("data", (chunk) => this.#onData(chunk));
+    });
+    const hello = await handshake;
+    this.info = { ...coordinates, ...hello };
+    return this.info;
+  }
+  get handshake() {
+    if (!this.handshakePromise) {
+      this.handshakePromise = new Promise((resolve, reject) => {
+        this.handshakeResolve = resolve;
+        this.handshakeReject = reject;
+        setTimeout(
+          () => reject(new AragonError(ERROR_CODES.RUNTIME_STALE, "handshake timed out")),
+          this.timeoutMs
+        ).unref?.();
+      });
+    }
+    return this.handshakePromise;
+  }
+  #onData(chunk) {
+    this.buffer += chunk;
+    let index = this.buffer.indexOf("\n");
+    while (index !== -1) {
+      const line = this.buffer.slice(0, index).trim();
+      this.buffer = this.buffer.slice(index + 1);
+      if (line.length > 0) this.#onMessage(line);
+      index = this.buffer.indexOf("\n");
+    }
+  }
+  #onMessage(line) {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (message?.type === "hello") {
+      if (message.ok) this.handshakeResolve?.(message);
+      else {
+        this.handshakeReject?.(
+          new AragonError(
+            message.error?.error_code ?? ERROR_CODES.UNAUTHORIZED,
+            message.error?.message ?? "handshake rejected"
+          )
+        );
+      }
+      return;
+    }
+    if (message?.event && !("id" in message)) {
+      this.onEvent?.(message);
+      return;
+    }
+    const entry = this.pending.get(message?.id);
+    if (!entry) return;
+    this.pending.delete(message.id);
+    clearTimeout(entry.timer);
+    if (message.ok) entry.resolve(message.result);
+    else {
+      entry.reject(
+        new AragonError(
+          message.error?.error_code ?? ERROR_CODES.OPERATION_FAILED,
+          message.error?.message ?? "request failed"
+        )
+      );
+    }
+  }
+  #failAll(error) {
+    for (const [, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      entry.reject(error);
+    }
+    this.pending.clear();
+  }
+  request(method, params = {}) {
+    if (!this.socket || this.socket.destroyed) {
+      return Promise.reject(
+        new AragonError(ERROR_CODES.RUNTIME_STALE, "runtime socket is not open")
+      );
+    }
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(
+          new AragonError(
+            ERROR_CODES.OPERATION_FAILED,
+            `${method} timed out after ${this.timeoutMs}ms`
+          )
+        );
+      }, this.timeoutMs);
+      timer.unref?.();
+      this.pending.set(id, { resolve, reject, timer });
+      this.socket.write(`${JSON.stringify({ id, method, params })}
+`);
+    });
+  }
+  close() {
+    this.#failAll(new AragonError(ERROR_CODES.RUNTIME_STALE, "runtime client closed"));
+    if (this.socket && !this.socket.destroyed) this.socket.end();
+    this.socket = null;
+  }
+};
+
+// src/cli/helpers.js
+var import_node_fs2 = __toESM(require("node:fs"), 1);
+var import_node_path2 = __toESM(require("node:path"), 1);
+
+// src/shared/public-api-schema.js
+var PUBLIC_API_SCHEMA = [
+  // --- discovery -----------------------------------------------------------
+  {
+    name: "browserVersion",
+    signature: "await browserVersion()",
+    area: "discovery",
+    summary: "Browser version, engine, platform and live space count."
+  },
+  {
+    name: "listProfiles",
+    signature: "await listProfiles()",
+    area: "discovery",
+    summary: 'Available profiles: [{ id, name, kind }]. "ephemeral" never writes to disk.'
+  },
+  {
+    name: "listTaskSpaces",
+    signature: "await listTaskSpaces()",
+    area: "discovery",
+    summary: "Every space with id, name, owner, agentState, profile and tabs."
+  },
+  {
+    name: "listLearnedSites",
+    signature: "await listLearnedSites()",
+    area: "discovery",
+    summary: "Installed site skills: id, name, domains, tool names."
+  },
+  // --- spaces --------------------------------------------------------------
+  {
+    name: "taskSpace",
+    signature: "await taskSpace(nameOrId)",
+    area: "spaces",
+    summary: "Select an existing space by name or id, creating it when the name is new. Reuses an agent-owned space of that name."
+  },
+  {
+    name: "createTaskSpace",
+    signature: "await createTaskSpace(name, profileId?)",
+    area: "spaces",
+    summary: "Create a space. profileId comes from listProfiles()."
+  },
+  {
+    name: "claimTaskSpace",
+    signature: "await claimTaskSpace(id)",
+    area: "spaces",
+    summary: "Take an agent-owned space by numeric id and make it current."
+  },
+  {
+    name: "useTaskSpace",
+    signature: "useTaskSpace(id)",
+    area: "spaces",
+    summary: "Select a space for the bare helpers (snapshot, listTabs, sendCDPMessage)."
+  },
+  {
+    name: "takeOverTaskSpace",
+    signature: "await takeOverTaskSpace(id?)",
+    area: "spaces",
+    summary: "Resume driving after the user had control."
+  },
+  {
+    name: "closeTaskSpace",
+    signature: "await closeTaskSpace(id?)",
+    area: "spaces",
+    summary: "Close a space and its window."
+  },
+  // --- TaskSpace methods ---------------------------------------------------
+  {
+    name: "TaskSpace.pages",
+    signature: "await space.pages()",
+    area: "space-methods",
+    summary: "Page handles for every tab in the space."
+  },
+  {
+    name: "TaskSpace.tabs",
+    signature: "await space.tabs()",
+    area: "space-methods",
+    summary: "Tab inventory: { id, label, origin, url, title, active }."
+  },
+  {
+    name: "TaskSpace.newPage",
+    signature: "await space.newPage(url?)",
+    area: "space-methods",
+    summary: "Open a tab (default about:blank) and return its Page."
+  },
+  {
+    name: "TaskSpace.page",
+    signature: "space.page(label)",
+    area: "space-methods",
+    summary: "A Page handle for a durable label such as p1."
+  },
+  {
+    name: "TaskSpace.handOff",
+    signature: "await space.handOff()",
+    area: "space-methods",
+    summary: "Give control to the user. Every mutating call fails with EGO_TASK_SPACE_USER_IN_CONTROL until takeOver."
+  },
+  {
+    name: "TaskSpace.finish",
+    signature: "await space.finish({ keep })",
+    area: "space-methods",
+    summary: 'keep is required: "all" or an array of Page labels. Closes agent tabs, never a tab the user opened.',
+    options: { keep: "keep" }
+  },
+  {
+    name: "TaskSpace.waitForControl",
+    signature: "await space.waitForControl({ interval?, timeout? })",
+    area: "space-methods",
+    summary: "Poll until the user hands the space back, without taking control.",
+    options: {
+      interval: "positiveMilliseconds",
+      timeout: "positiveMilliseconds"
+    }
+  },
+  {
+    name: "TaskSpace.setAgentState",
+    signature: "await space.setAgentState(state)",
+    area: "space-methods",
+    summary: "idle | running | paused | error, shown in the UI."
+  },
+  {
+    name: "TaskSpace.learn",
+    signature: "await space.learn({ url? })",
+    area: "space-methods",
+    summary: "Learned notes and tool signatures that apply to this page."
+  },
+  // --- Page observation ----------------------------------------------------
+  {
+    name: "Page.snapshot",
+    signature: "await page.snapshot({ interactiveOnly?, maxDepth?, debug? })",
+    area: "observe",
+    summary: "Accessibility snapshot: text plus refs[]. Cross-site iframes are flattened at their <iframe> element.",
+    options: {
+      interactiveOnly: "boolean",
+      maxDepth: "positiveInteger",
+      debug: "boolean"
+    }
+  },
+  {
+    name: "Page.info",
+    signature: "await page.info()",
+    area: "observe",
+    summary: "url, title, tab count, history availability, loading flag."
+  },
+  {
+    name: "Page.frames",
+    signature: "await page.frames()",
+    area: "observe",
+    summary: "CDP session topology: sessionId, frameId, parentSessionId per frame."
+  },
+  {
+    name: "Page.screenshot",
+    signature: "await page.screenshot({ format?, clip?, fullPage?, save? })",
+    area: "observe",
+    summary: "Page pixels. `save` writes a file and returns its path and byte size.",
+    options: {
+      format: "screenshotFormat",
+      fullPage: "boolean",
+      save: "nonEmptyString"
+    }
+  },
+  {
+    name: "Page.events",
+    signature: "await page.events({ method?, sinceSeq?, limit? })",
+    area: "observe",
+    summary: "Recent CDP events (bounded 10k ring). method accepts a `*` suffix.",
+    options: {
+      method: "string",
+      sinceSeq: "nonNegativeNumber",
+      limit: "positiveInteger"
+    }
+  },
+  {
+    name: "Page.dialogs",
+    signature: "await page.dialogs()",
+    area: "observe",
+    summary: "JS dialogs seen so far and the current auto-handling policy."
+  },
+  // --- acting --------------------------------------------------------------
+  {
+    name: "Page.goto",
+    signature: "await page.goto(url)",
+    area: "act",
+    summary: "Navigate the current tab. Invalidates every ref from the old document."
+  },
+  {
+    name: "Page.click",
+    signature: "await page.click(target, { button?, clickCount? })",
+    area: "act",
+    summary: "Trusted pointer click at the element's measured position.",
+    options: { button: "mouseButton", clickCount: "positiveInteger" }
+  },
+  {
+    name: "Page.doubleClick",
+    signature: "await page.doubleClick(target)",
+    area: "act",
+    summary: "Two real clicks with the native double-click interval."
+  },
+  {
+    name: "Page.rightClick",
+    signature: "await page.rightClick(target)",
+    area: "act",
+    summary: "Right button click (context menu)."
+  },
+  {
+    name: "Page.fill",
+    signature: "await page.fill(target, text, { submit?, delayMs? })",
+    area: "act",
+    summary: "Focus, select-all, then insertText so framework-controlled inputs see a real input event.",
+    options: { submit: "boolean", delayMs: "nonNegativeNumber" }
+  },
+  {
+    name: "Page.type",
+    signature: "await page.type(text, { delayMs? })",
+    area: "act",
+    summary: "Type into whatever currently has focus.",
+    options: { delayMs: "nonNegativeNumber" }
+  },
+  {
+    name: "Page.press",
+    signature: "await page.press(key)",
+    area: "act",
+    summary: "Enter | Tab | Escape | Backspace | Delete | Arrow* | space | a single character."
+  },
+  {
+    name: "Page.hover",
+    signature: "await page.hover(target)",
+    area: "act",
+    summary: "Move the pointer over an element."
+  },
+  {
+    name: "Page.scroll",
+    signature: "await page.scroll({ dx?, dy?, target? })",
+    area: "act",
+    summary: "Wheel scroll, optionally aimed at an element.",
+    options: { dx: "finiteNumber", dy: "finiteNumber" }
+  },
+  {
+    name: "Page.drag",
+    signature: "await page.drag(from, to, { steps? })",
+    area: "act",
+    summary: "Pointer drag with intermediate moves, which drag implementations require.",
+    options: { steps: "positiveInteger" }
+  },
+  {
+    name: "Page.upload",
+    signature: "await page.upload(target, files)",
+    area: "act",
+    summary: 'Attach files to an <input type="file">. Paths are existence-checked first.'
+  },
+  {
+    name: "Page.clipboard",
+    signature: "await page.clipboard(text) / await page.readClipboard()",
+    area: "act",
+    summary: "Write to and read from the real system clipboard."
+  },
+  {
+    name: "Page.goBack",
+    signature: "await page.goBack()",
+    area: "act",
+    summary: "Browser back."
+  },
+  {
+    name: "Page.goForward",
+    signature: "await page.goForward()",
+    area: "act",
+    summary: "Browser forward."
+  },
+  {
+    name: "Page.reload",
+    signature: "await page.reload()",
+    area: "act",
+    summary: "Reload the current document."
+  },
+  // --- waiting -------------------------------------------------------------
+  {
+    name: "Page.waitFor",
+    signature: "await page.waitFor(target, { timeoutMs?, intervalMs? })",
+    area: "wait",
+    summary: "Wait for a target to resolve. Retries only transient failures.",
+    options: { timeoutMs: "positiveMilliseconds", intervalMs: "positiveMilliseconds" }
+  },
+  {
+    name: "Page.waitForText",
+    signature: "await page.waitForText(text, { timeoutMs? })",
+    area: "wait",
+    summary: "Wait until the page text contains this substring (case-insensitive).",
+    options: { timeoutMs: "positiveMilliseconds" }
+  },
+  {
+    name: "Page.waitForExpression",
+    signature: "await page.waitForExpression(js, { timeoutMs? })",
+    area: "wait",
+    summary: "Wait until a JS expression is truthy.",
+    options: { timeoutMs: "positiveMilliseconds" }
+  },
+  {
+    name: "Page.waitForLoad",
+    signature: "await page.waitForLoad({ timeoutMs? })",
+    area: "wait",
+    summary: "Wait for document.readyState === 'complete'.",
+    options: { timeoutMs: "positiveMilliseconds" }
+  },
+  {
+    name: "Page.waitForNavigation",
+    signature: "await page.waitForNavigation({ timeoutMs? })",
+    area: "wait",
+    summary: "Wait for a real navigation (loaderId change, then load). Needed after a click: waitForLoad returns instantly on the old document.",
+    options: { timeoutMs: "positiveMilliseconds" }
+  },
+  {
+    name: "Page.waitForNetworkIdle",
+    signature: "await page.waitForNetworkIdle({ idleMs?, timeoutMs? })",
+    area: "wait",
+    summary: "Wait until no request has been in flight for idleMs.",
+    options: { idleMs: "positiveMilliseconds", timeoutMs: "positiveMilliseconds" }
+  },
+  {
+    name: "Page.waitForDialog",
+    signature: "await page.waitForDialog({ timeoutMs? })",
+    area: "wait",
+    summary: "Wait for a JS dialog to open.",
+    options: { timeoutMs: "positiveMilliseconds" }
+  },
+  // --- dialogs -------------------------------------------------------------
+  {
+    name: "Page.answerDialog",
+    signature: "await page.answerDialog({ accept?, promptText? })",
+    area: "dialogs",
+    summary: "Answer the oldest open dialog explicitly.",
+    options: { accept: "boolean", promptText: "string" }
+  },
+  {
+    name: "Page.setDialogPolicy",
+    signature: "await page.setDialogPolicy(policy)",
+    area: "dialogs",
+    summary: "accept | dismiss | manual. Default is dismiss: an unanswered dialog hangs the page."
+  },
+  // --- verification --------------------------------------------------------
+  {
+    name: "Page.evaluate",
+    signature: "await page.evaluate(js, { sessionId? })",
+    area: "verify",
+    summary: "Run JS in the page (or a frame, given its sessionId) and return the value.",
+    options: { sessionId: "string" }
+  },
+  {
+    name: "Page.cdp",
+    signature: "await page.cdp({ method, params?, sessionId? })",
+    area: "verify",
+    summary: "Raw CDP escape hatch, including per-frame sessions.",
+    options: { sessionId: "string" }
+  },
+  {
+    name: "sendCDPMessage",
+    signature: "await sendCDPMessage({ method, params?, sessionId? })",
+    area: "verify",
+    summary: "Same as Page.cdp for the selected space."
+  },
+  // --- learned site skills -------------------------------------------------
+  {
+    name: "runSiteTool",
+    signature: "await runSiteTool(siteId, toolName, args?)",
+    area: "learn",
+    summary: "Run a learned node-side site tool. It receives the live browser context."
+  },
+  {
+    name: "runSiteBrowserTool",
+    signature: "await runSiteBrowserTool(siteId, toolName, args?)",
+    area: "learn",
+    summary: "Run a learned page-side site tool (evaluated inside the page)."
+  },
+  {
+    name: "learnContext",
+    signature: "await learnContext({ url? })",
+    area: "learn",
+    summary: "Notes and tool signatures for a URL."
+  },
+  {
+    name: "validateSiteSkills",
+    signature: "await validateSiteSkills()",
+    area: "learn",
+    summary: "Check every installed site skill; returns { ok, errors }."
+  },
+  // --- utilities -----------------------------------------------------------
+  {
+    name: "cliLog",
+    signature: "cliLog(...values)",
+    area: "utility",
+    summary: "Print a line to the agent's output."
+  },
+  {
+    name: "help",
+    signature: "help()",
+    area: "utility",
+    summary: "Print this guide."
+  }
+];
+function validateOptionValue(name, kind, value) {
+  if (value === void 0) return null;
+  const fail = (expectation) => `option ${name} ${expectation}, got ${JSON.stringify(value)}`;
+  switch (kind) {
+    case "boolean":
+      return typeof value === "boolean" ? null : fail("must be a boolean");
+    case "string":
+      return typeof value === "string" ? null : fail("must be a string");
+    case "nonEmptyString":
+      return typeof value === "string" && value.trim() ? null : fail("must be a non-empty string");
+    case "finiteNumber":
+      return typeof value === "number" && Number.isFinite(value) ? null : fail("must be a finite number");
+    case "nonNegativeNumber":
+      return typeof value === "number" && Number.isFinite(value) && value >= 0 ? null : fail("must be a number >= 0");
+    case "positiveInteger":
+      return Number.isInteger(value) && value > 0 ? null : fail("must be a positive integer");
+    case "positiveMilliseconds":
+      return typeof value === "number" && Number.isFinite(value) && value > 0 ? null : fail("must be a positive number of milliseconds");
+    case "mouseButton":
+      return ["left", "right", "middle"].includes(value) ? null : fail("must be one of left, right, middle");
+    case "screenshotFormat":
+      return ["png", "jpeg"].includes(value) ? null : fail("must be png or jpeg");
+    case "keep":
+      if (value === "all") return null;
+      if (Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.trim()) && new Set(value).size === value.length) {
+        return null;
+      }
+      return fail('must be "all" or an array of unique non-empty Page labels');
+    default:
+      return null;
+  }
+}
+function validateOptions(apiName, schema, options = {}) {
+  const declared = schema.options ?? {};
+  for (const [key, value] of Object.entries(options)) {
+    if (!(key in declared)) {
+      const expected = Object.keys(declared).join(", ") || "no options";
+      throw new TypeError(
+        `${apiName} received unknown option: ${key}. Expected: ${expected}`
+      );
+    }
+    const problem = validateOptionValue(key, declared[key], value);
+    if (problem) throw new TypeError(`${apiName}: ${problem}`);
+  }
+}
+var AREA_TITLES = {
+  discovery: "Discovery",
+  spaces: "Task spaces",
+  "space-methods": "TaskSpace methods",
+  observe: "Observing",
+  act: "Acting",
+  wait: "Waiting",
+  dialogs: "JS dialogs",
+  verify: "Verifying and raw CDP",
+  learn: "Learned site skills",
+  utility: "Utilities"
+};
+function renderHelp() {
+  const lines = ["aragon-browser helpers", ""];
+  const areas = [...new Set(PUBLIC_API_SCHEMA.map((entry) => entry.area))];
+  for (const area of areas) {
+    lines.push(`${AREA_TITLES[area] ?? area}`);
+    for (const entry of PUBLIC_API_SCHEMA.filter((item) => item.area === area)) {
+      lines.push(`  ${entry.signature}`);
+      lines.push(`      ${entry.summary}`);
+    }
+    lines.push("");
+  }
+  lines.push("Targets: @N ref | css:<sel> | loc=role:<role>[name=...] | text=...");
+  lines.push("         href:<path> | xpath=<expr> | <css> >> nth=N");
+  lines.push("Refs (@N) stay stable while the document lives and go stale after navigation.");
+  return lines.join("\n");
+}
+
+// src/cli/helpers.js
+var SCHEMA_BY_NAME = new Map(PUBLIC_API_SCHEMA.map((entry) => [entry.name, entry]));
+function checkOptions(apiName, options) {
+  const schema = SCHEMA_BY_NAME.get(apiName);
+  if (schema) validateOptions(apiName, schema, options);
+}
+function createHelpers(client, { log = console.log } = {}) {
+  let selectedSpaceId = null;
+  const call = (method, params = {}) => client.request(method, params);
+  const withSpace = (params = {}) => {
+    if (selectedSpaceId === null) {
+      throw new AragonError(
+        ERROR_CODES.TASK_SPACE_NOT_SELECTED,
+        "no task space selected; call taskSpace(name) (creates one if needed) or useTaskSpace(id)"
+      );
+    }
+    return { ...params, spaceId: selectedSpaceId };
+  };
+  async function resolveSpace(nameOrId) {
+    if (nameOrId === void 0 || nameOrId === null) {
+      const { spaces: spaces2 } = await call("spaces.list");
+      if (spaces2.length === 0) {
+        const created2 = await call("spaces.create", {});
+        selectedSpaceId = created2.id;
+        return created2;
+      }
+      const agentSpace = spaces2.find((space) => space.owner === "agent") ?? spaces2[0];
+      selectedSpaceId = agentSpace.id;
+      return agentSpace;
+    }
+    if (Number.isInteger(nameOrId) || /^\d+$/.test(String(nameOrId))) {
+      const id = Number(nameOrId);
+      const space = await call("spaces.claim", { spaceId: id });
+      selectedSpaceId = id;
+      return space;
+    }
+    const name = String(nameOrId);
+    const { spaces } = await call("spaces.list");
+    const match = spaces.find((space) => space.name === name);
+    if (match) {
+      selectedSpaceId = match.id;
+      return match;
+    }
+    const created = await call("spaces.create", { name });
+    selectedSpaceId = created.id;
+    return created;
+  }
+  class Page {
+    constructor(spaceId, tabId = null, label = null) {
+      this.spaceId = spaceId;
+      this.tabId = tabId;
+      this.label = label;
+    }
+    async #ensureTab() {
+      const { tabs } = await call("tabs.list", { spaceId: this.spaceId });
+      if (tabs.length === 0) {
+        const created = await call("tabs.create", { spaceId: this.spaceId, url: "about:blank" });
+        this.tabId = created.id;
+        this.label = created.label ?? this.label;
+        return;
+      }
+      const target = this.tabId ? tabs.find((tab) => tab.id === this.tabId) : tabs.at(-1);
+      if (target && !target.active) {
+        await call("tabs.activate", { spaceId: this.spaceId, tabId: target.id });
+      }
+      if (target) {
+        this.tabId = target.id;
+        this.label = target.label ?? this.label;
+      }
+    }
+    async goto(url) {
+      await this.#ensureTab();
+      const result = await call("act.navigate", { spaceId: this.spaceId, url });
+      const { tabs } = await call("tabs.list", { spaceId: this.spaceId });
+      const active = tabs.find((tab) => tab.active);
+      if (active) {
+        this.tabId = active.id;
+        this.label = active.label ?? this.label;
+      }
+      return result;
+    }
+    async info() {
+      return call("page.info", { spaceId: this.spaceId });
+    }
+    async frames() {
+      return call("page.frames", { spaceId: this.spaceId });
+    }
+    async snapshot(options = {}) {
+      checkOptions("Page.snapshot", options);
+      await this.#ensureTab();
+      return call("snapshot.capture", { spaceId: this.spaceId, ...options });
+    }
+    async click(target, options = {}) {
+      checkOptions("Page.click", options);
+      return call("act.click", { spaceId: this.spaceId, target, ...options });
+    }
+    async doubleClick(target) {
+      return call("act.doubleClick", { spaceId: this.spaceId, target });
+    }
+    async rightClick(target) {
+      return call("act.rightClick", { spaceId: this.spaceId, target });
+    }
+    async fill(target, text, options = {}) {
+      checkOptions("Page.fill", options);
+      return call("act.fill", { spaceId: this.spaceId, target, text, ...options });
+    }
+    async type(text, options = {}) {
+      checkOptions("Page.type", options);
+      return call("act.type", { spaceId: this.spaceId, text, ...options });
+    }
+    async press(key) {
+      return call("act.press", { spaceId: this.spaceId, key });
+    }
+    async hover(target) {
+      return call("act.hover", { spaceId: this.spaceId, target });
+    }
+    async scroll(options = {}) {
+      checkOptions("Page.scroll", options);
+      return call("act.scroll", { spaceId: this.spaceId, ...options });
+    }
+    async drag(from, to, options = {}) {
+      checkOptions("Page.drag", options);
+      return call("act.drag", { spaceId: this.spaceId, from, to, ...options });
+    }
+    async upload(target, files) {
+      return call("act.upload", { spaceId: this.spaceId, target, files });
+    }
+    async clipboard(text) {
+      return call("clipboard.write", { spaceId: this.spaceId, text });
+    }
+    async readClipboard() {
+      return call("clipboard.read", { spaceId: this.spaceId });
+    }
+    async goBack() {
+      return call("act.goBack", { spaceId: this.spaceId });
+    }
+    async goForward() {
+      return call("act.goForward", { spaceId: this.spaceId });
+    }
+    async reload() {
+      return call("act.reload", { spaceId: this.spaceId });
+    }
+    async waitFor(target, options = {}) {
+      checkOptions("Page.waitFor", options);
+      return call("wait.target", { spaceId: this.spaceId, target, ...options });
+    }
+    async waitForText(text, options = {}) {
+      checkOptions("Page.waitForText", options);
+      return call("wait.text", { spaceId: this.spaceId, text, ...options });
+    }
+    async waitForExpression(expression, options = {}) {
+      checkOptions("Page.waitForExpression", options);
+      return call("wait.expression", { spaceId: this.spaceId, expression, ...options });
+    }
+    async waitForLoad(options = {}) {
+      checkOptions("Page.waitForLoad", options);
+      return call("wait.load", { spaceId: this.spaceId, ...options });
+    }
+    /**
+     * Wait for a real navigation. Use this after a click that navigates:
+     * waitForLoad would return immediately because the old document is complete.
+     */
+    async waitForNavigation(options = {}) {
+      checkOptions("Page.waitForNavigation", options);
+      return call("wait.navigation", { spaceId: this.spaceId, ...options });
+    }
+    async waitForNetworkIdle(options = {}) {
+      checkOptions("Page.waitForNetworkIdle", options);
+      return call("wait.networkIdle", { spaceId: this.spaceId, ...options });
+    }
+    async waitForDialog(options = {}) {
+      checkOptions("Page.waitForDialog", options);
+      return call("wait.dialog", { spaceId: this.spaceId, ...options });
+    }
+    async answerDialog(options = {}) {
+      checkOptions("Page.answerDialog", options);
+      return call("dialog.answer", { spaceId: this.spaceId, ...options });
+    }
+    async setDialogPolicy(policy) {
+      return call("dialog.policy", { spaceId: this.spaceId, policy });
+    }
+    async dialogs() {
+      return call("dialog.list", { spaceId: this.spaceId });
+    }
+    async events(options = {}) {
+      checkOptions("Page.events", options);
+      return call("events.history", { spaceId: this.spaceId, ...options });
+    }
+    async evaluate(expression, options = {}) {
+      checkOptions("Page.evaluate", options);
+      const result = await call("page.evaluate", {
+        spaceId: this.spaceId,
+        expression,
+        ...options
+      });
+      return result?.value ?? null;
+    }
+    async screenshot(options = {}) {
+      checkOptions("Page.screenshot", options);
+      const shot = await call("shot.capture", {
+        spaceId: this.spaceId,
+        format: options.format,
+        clip: options.clip,
+        fullPage: options.fullPage
+      });
+      if (!options.save) {
+        return { ...shot, bytes: Buffer.from(shot.base64, "base64").length };
+      }
+      const target = import_node_path2.default.resolve(options.save);
+      import_node_fs2.default.mkdirSync(import_node_path2.default.dirname(target), { recursive: true });
+      import_node_fs2.default.writeFileSync(target, Buffer.from(shot.base64, "base64"));
+      return { path: target, format: shot.format, bytes: import_node_fs2.default.statSync(target).size };
+    }
+    async cdp(message) {
+      return call("cdp.send", { spaceId: this.spaceId, message });
+    }
+    /** Learned site knowledge that applies to this page. */
+    async learn(options = {}) {
+      return call("learn.context", { spaceId: this.spaceId, ...options });
+    }
+    async captureChrome() {
+      return call("ui.captureChrome", { spaceId: this.spaceId });
+    }
+    async captureWindow() {
+      return call("ui.captureWindow", { spaceId: this.spaceId });
+    }
+  }
+  class TaskSpace {
+    constructor(descriptor) {
+      this.id = descriptor.id;
+      this.spaceId = descriptor.id;
+      this.name = descriptor.name;
+      this.owner = descriptor.owner;
+      this.ownership = descriptor.owner;
+      this.agentState = descriptor.agentState;
+      this.profileId = descriptor.profileId;
+      this.partition = descriptor.partition;
+      this._tabs = descriptor.tabs ?? [];
+    }
+    async refresh() {
+      const { spaces } = await call("spaces.list");
+      const found = spaces.find((space) => space.id === this.id);
+      if (found) {
+        Object.assign(this, found);
+        this.ownership = found.owner;
+        this._tabs = found.tabs ?? [];
+      }
+      return this;
+    }
+    async captureChrome() {
+      return call("ui.captureChrome", { spaceId: this.id });
+    }
+    async captureWindow() {
+      return call("ui.captureWindow", { spaceId: this.id });
+    }
+    async layout() {
+      return call("ui.layout", { spaceId: this.id });
+    }
+    async pages() {
+      const { tabs } = await call("tabs.list", { spaceId: this.id });
+      return tabs.map((tab) => new Page(this.id, tab.id, tab.label));
+    }
+    async tabs() {
+      const { tabs } = await call("tabs.list", { spaceId: this.id });
+      return tabs;
+    }
+    /** A Page handle for a durable label, without checking it exists. */
+    page(label) {
+      const found = this._tabs.find((tab) => tab.label === label);
+      return new Page(this.id, found?.id ?? null, label);
+    }
+    async newPage(url = "about:blank") {
+      const tab = await call("tabs.create", { spaceId: this.id, url });
+      this._tabs.push(tab);
+      return new Page(this.id, tab.id, tab.label);
+    }
+    async page_() {
+      const pages = await this.pages();
+      if (pages.length > 0) return pages.at(-1);
+      return this.newPage("about:blank");
+    }
+    async snapshot(options = {}) {
+      checkOptions("Page.snapshot", options);
+      return call("snapshot.capture", { spaceId: this.id, ...options });
+    }
+    async setAgentState(state) {
+      const descriptor = await call("spaces.setAgentState", { spaceId: this.id, state });
+      Object.assign(this, descriptor);
+      return this;
+    }
+    async handOff() {
+      const descriptor = await call("spaces.handOff", { spaceId: this.id });
+      Object.assign(this, { owner: descriptor.owner, ownership: descriptor.owner });
+      return descriptor;
+    }
+    async complete() {
+      return call("spaces.complete", { spaceId: this.id });
+    }
+    async finish(options = {}) {
+      checkOptions("TaskSpace.finish", options);
+      if (options.keep === void 0) {
+        throw new TypeError(
+          'finish() requires keep: "all" or an array of Page labels - closing tabs is destructive'
+        );
+      }
+      return call("spaces.finish", { spaceId: this.id, keep: options.keep });
+    }
+    async waitForControl(options = {}) {
+      checkOptions("TaskSpace.waitForControl", options);
+      return call("spaces.waitForControl", { spaceId: this.id, ...options });
+    }
+    async learn(options = {}) {
+      return call("learn.context", { spaceId: this.id, ...options });
+    }
+    async close() {
+      return call("spaces.close", { spaceId: this.id });
+    }
+  }
+  const helpers = {
+    async browserVersion() {
+      return call("runtime.version");
+    },
+    async listProfiles() {
+      return call("profiles.list");
+    },
+    async listTaskSpaces() {
+      const { spaces } = await call("spaces.list");
+      return spaces;
+    },
+    async listLearnedSites() {
+      return call("learn.list");
+    },
+    async createTaskSpace(name, profileId) {
+      return new TaskSpace(await call("spaces.create", { name, profileId }));
+    },
+    async claimTaskSpace(id, name) {
+      return new TaskSpace(await call("spaces.claim", { spaceId: id, name }));
+    },
+    async taskSpace(nameOrId) {
+      const descriptor = await resolveSpace(nameOrId);
+      return new TaskSpace(descriptor);
+    },
+    useTaskSpace(id) {
+      selectedSpaceId = Number(id);
+      return selectedSpaceId;
+    },
+    async currentTaskSpace() {
+      if (selectedSpaceId === null) {
+        throw new AragonError(
+          ERROR_CODES.TASK_SPACE_NOT_SELECTED,
+          "no task space selected yet"
+        );
+      }
+      return new TaskSpace(await call("spaces.claim", { spaceId: selectedSpaceId }));
+    },
+    async takeOverTaskSpace(id = selectedSpaceId) {
+      const spaceId = id === null || id === void 0 ? selectedSpaceId : Number(id);
+      if (!spaceId) {
+        throw new AragonError(
+          ERROR_CODES.TASK_SPACE_NOT_SELECTED,
+          "takeOverTaskSpace() needs an id when no space is selected"
+        );
+      }
+      return call("spaces.takeOver", { spaceId });
+    },
+    async closeTaskSpace(id = selectedSpaceId) {
+      return call("spaces.close", { spaceId: id ?? selectedSpaceId });
+    },
+    async createTab(url = "about:blank") {
+      const space = await helpers.currentTaskSpace();
+      return space.newPage(url);
+    },
+    async listTabs() {
+      const space = await helpers.currentTaskSpace();
+      return space.tabs();
+    },
+    async snapshot(options = {}) {
+      checkOptions("Page.snapshot", options);
+      const space = await helpers.currentTaskSpace();
+      return space.snapshot(options);
+    },
+    async sendCDPMessage(message) {
+      return call("cdp.send", {
+        spaceId: selectedSpaceId,
+        message
+      });
+    },
+    async learnContext(options = {}) {
+      return call("learn.context", withSpace(options));
+    },
+    async runSiteTool(siteId, toolName, args = {}) {
+      return call("learn.runTool", withSpace({ siteId, toolName, args }));
+    },
+    async runSiteBrowserTool(siteId, toolName, args = {}) {
+      return call("learn.runBrowserTool", withSpace({ siteId, toolName, args }));
+    },
+    async validateSiteSkills() {
+      return call("learn.validate");
+    },
+    cliLog(...args) {
+      log(args.map((arg) => typeof arg === "string" ? arg : safeJson(arg)).join(" "));
+    },
+    help() {
+      log(renderHelp());
+    }
+  };
+  Object.defineProperty(helpers, "__selectedSpaceId", {
+    get: () => selectedSpaceId
+  });
+  return helpers;
+}
+function safeJson(value) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+function skillSummary() {
+  return renderHelp();
+}
+
+// src/cli/run.js
+async function runScript(code, helpers, { log = console.log } = {}) {
+  const names = Object.keys(helpers);
+  const values = names.map((name) => helpers[name]);
+  const wrapped = `return (async () => {
+${code}
+})();`;
+  let fn;
+  try {
+    fn = new Function(...names, wrapped);
+  } catch (error) {
+    throw new Error(`script did not compile: ${error.message}`);
+  }
+  const previousArgon = globalThis.aragon;
+  globalThis.aragon = { ...helpers, helpers: skillSummary() };
+  try {
+    const result = await fn(...values);
+    if (result !== void 0) {
+      log(typeof result === "string" ? result : JSON.stringify(result, null, 2));
+    }
+    return result;
+  } finally {
+    globalThis.aragon = previousArgon;
+  }
+}
+
+// src/cli/index.js
+init_paths();
+var __dirname2 = import_node_path6.default.dirname((0, import_node_url3.fileURLToPath)(__importMetaUrl));
+var USAGE = `aragon-browser - drive the aragon nano browser from a script
+
+Usage:
+  aragon-browser [nodejs] [options]        read JavaScript from stdin and run it
+  aragon-browser nodejs -e "<code>"        run inline code
+  aragon-browser status                    runtime version and live spaces
+  aragon-browser spaces                    list task spaces
+  aragon-browser skill                     agent guide (helpers rendered from the schema)
+  aragon-browser help-api                  the API surface only
+  aragon-browser learn                     validate every installed site skill
+  aragon-browser -h | --help               this text
+
+Options:
+  -e, --eval <code>      script source instead of stdin
+  -s, --space <id|name>  select a task space before the script runs
+      --runtime-file <p> coordinates file (default: %TEMP%\\aragon-browser\\runtime.json)
+      --json             print the raw result object as JSON
+`;
+function parseArgs(argv) {
+  const options = {
+    command: null,
+    evalCode: null,
+    space: null,
+    json: false,
+    runtimeFile: runtimeFilePath()
+  };
+  const rest = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "-h" || arg === "--help") {
+      options.command = "help";
+      continue;
+    }
+    if (arg === "-e" || arg === "--eval") {
+      options.evalCode = argv[++index] ?? "";
+      continue;
+    }
+    if (arg === "-s" || arg === "--space") {
+      options.space = argv[++index] ?? null;
+      continue;
+    }
+    if (arg === "--runtime-file") {
+      options.runtimeFile = import_node_path6.default.resolve(argv[++index] ?? "");
+      continue;
+    }
+    if (arg === "--json") {
+      options.json = true;
+      continue;
+    }
+    if (arg === "--sdk-path") {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      throw new AragonError(ERROR_CODES.INVALID_ARGUMENT, `unknown option ${arg}`);
+    }
+    rest.push(arg);
+  }
+  options.command = options.command ?? rest[0] ?? "nodejs";
+  return options;
+}
+async function readStdin() {
+  if (import_node_process.default.stdin.isTTY) return "";
+  const chunks = [];
+  for await (const chunk of import_node_process.default.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+async function main() {
+  const options = parseArgs(import_node_process.default.argv.slice(2));
+  if (options.command === "help") {
+    import_node_process.default.stdout.write(USAGE);
+    return 0;
+  }
+  if (options.command === "skill") {
+    import_node_process.default.stdout.write(import_node_fs6.default.readFileSync(import_node_path6.default.join(skillBodyDir(), "SKILL.md"), "utf8").replace(
+      "<!-- HELP -->",
+      renderHelp()
+    ));
+    return 0;
+  }
+  if (options.command === "help-api") {
+    import_node_process.default.stdout.write(`${renderHelp()}
+`);
+    return 0;
+  }
+  if (options.command === "learn") {
+    const { validateLearnings: validateLearnings2 } = await Promise.resolve().then(() => (init_validate(), validate_exports));
+    const errors = await validateLearnings2();
+    if (errors.length === 0) {
+      import_node_process.default.stdout.write("all site skills valid\n");
+      return 0;
+    }
+    import_node_process.default.stderr.write(`${errors.join("\n")}
+`);
+    return 1;
+  }
+  const client = new RuntimeClient({ runtimeFile: options.runtimeFile });
+  const info = await client.connect();
+  try {
+    if (options.command === "status") {
+      const version = await client.request("runtime.version");
+      const { spaces } = await client.request("spaces.list");
+      import_node_process.default.stdout.write(
+        `${JSON.stringify({ runtime: { ...info, token: "\xABredacted\xBB" }, version, spaces }, null, 2)}
+`
+      );
+      return 0;
+    }
+    if (options.command === "spaces") {
+      const { spaces } = await client.request("spaces.list");
+      import_node_process.default.stdout.write(`${JSON.stringify(spaces, null, 2)}
+`);
+      return 0;
+    }
+    if (options.command !== "nodejs") {
+      throw new AragonError(
+        ERROR_CODES.INVALID_ARGUMENT,
+        `unknown command "${options.command}"; try --help`
+      );
+    }
+    const source = options.evalCode ?? await readStdin();
+    if (!source.trim()) {
+      import_node_process.default.stderr.write("aragon-browser: no script on stdin (use -e for inline code)\n");
+      return 2;
+    }
+    const helpers = createHelpers(client, {
+      log: (line) => import_node_process.default.stdout.write(`${line}
+`),
+      logError: (line) => import_node_process.default.stderr.write(`${line}
+`)
+    });
+    if (options.space !== null) {
+      const space = await helpers.taskSpace(options.space);
+      helpers.useTaskSpace(space.id);
+    }
+    await runScript(source, helpers, {
+      log: (line) => import_node_process.default.stdout.write(`${line}
+`)
+    });
+    return 0;
+  } finally {
+    client.close();
+  }
+}
+main().then((code) => import_node_process.default.exit(code ?? 0)).catch((error) => {
+  const code = error?.error_code ?? "ARAGON_ERROR";
+  import_node_process.default.stderr.write(`aragon-browser: ${code}: ${error?.message ?? error}
+`);
+  import_node_process.default.exit(1);
+});
+if (import_node_process.default.platform === "win32" && import_node_process.default.stdout.isTTY) {
+  import_node_process.default.stderr.write(
+    "[aragon-browser] note: if non-ASCII page text looks garbled, run `chcp 65001` first; the data itself is valid UTF-8.\n"
+  );
+}

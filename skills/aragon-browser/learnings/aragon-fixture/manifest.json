@@ -1,0 +1,45 @@
+{
+  "id": "aragon-fixture",
+  "name": "aragon fixture site",
+  "domains": ["127.0.0.1", "localhost"],
+  "notes": ["notes/overview.md"],
+  "nodeTools": {
+    "read_email_field": {
+      "description": "Read the value currently in the sign-in email input.",
+      "path": "tools/read-email.js",
+      "callable": "readEmailField",
+      "args": {},
+      "returns": {
+        "type": "string",
+        "description": "Current value of the email input."
+      }
+    },
+    "submit_email": {
+      "description": "Fill the email input and press Continue, then report the page reaction.",
+      "path": "tools/submit-email.js",
+      "callable": "submitEmail",
+      "args": {
+        "email": {
+          "type": "string",
+          "required": true,
+          "description": "Address to type into the email input."
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "Object with the filled value and the page's reaction text."
+      }
+    }
+  },
+  "browserTools": {
+    "form_state": {
+      "description": "Read the form's client-side state directly from the page.",
+      "path": "browser-tools/form-state.js",
+      "args": {},
+      "returns": {
+        "type": "object",
+        "description": "Form field values and the result div's text."
+      }
+    }
+  }
+}

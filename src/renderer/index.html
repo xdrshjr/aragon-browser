@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:;"
+    />
+    <title>aragon-browser</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="mark">◈</span>
+        <span class="brand-text">aragon<b>browser</b></span>
+      </div>
+      <div class="side-label">Spaces</div>
+      <ul id="space-list"></ul>
+      <button id="new-space" class="ghost">+ new space</button>
+      <div class="side-foot">
+        <div id="engine" class="muted">engine…</div>
+        <div id="runtime" class="muted mono"></div>
+      </div>
+    </aside>
+
+    <header id="chrome">
+      <div id="tabs"></div>
+      <div id="toolbar">
+        <button id="back" class="icon" title="back">←</button>
+        <button id="forward" class="icon" title="forward">→</button>
+        <button id="reload" class="icon" title="reload">⟳</button>
+        <input id="address" spellcheck="false" placeholder="search or enter address" />
+        <div id="owner" class="badge" title="who is driving this space">agent</div>
+        <button id="handoff" class="pill">give to user</button>
+      </div>
+    </header>
+
+    <footer id="statusbar">
+      <span id="status">ready</span>
+      <span class="spacer"></span>
+      <span id="agent-state" class="muted">agent: idle</span>
+    </footer>
+
+    <script type="module" src="ui.js"></script>
+  </body>
+</html>
