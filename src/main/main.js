@@ -5,6 +5,8 @@ import { BrowserKernel } from "../kernel/browser-kernel.js";
 import { RuntimeTransport } from "../kernel/runtime-transport.js";
 import { runtimeFilePath } from "../shared/protocol.js";
 import { ensureSetup, buildAppMenu } from "./menu.js";
+import { scopeRendererParams } from "./space-scope.js";
+import { applyWindowAction } from "./window-controls.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = "0.1.0";
@@ -76,19 +78,37 @@ async function boot() {
   kernel.spaces.onStateChange = (spaceList) => {
     broadcastState(spaceList);
     for (const window of BrowserWindow.getAllWindows()) {
-      if (!window.isDestroyed()) window.webContents.send("aragon:state", spaceList);
+      // `webContents` can already be gone while `isDestroyed()` is still false;
+      // sending then throws from inside this handler. The API window from the
+      // Agent menu has no preload listening, so it is skipped too.
+      if (window.isDestroyed() || window.webContents.isDestroyed()) continue;
+      window.webContents.send("aragon:state", spaceList);
     }
   };
 
-  ipcMain.handle("aragon:rpc", async (_event, payload) => {
+  ipcMain.handle("aragon:rpc", async (event, payload) => {
     const method = String(payload?.method ?? "");
     // The renderer is the untrusted-ish side: it can drive chrome, never the
     // agent surface. This is the one line that keeps that promise.
     if (!method.startsWith("ui.")) {
       return { ok: false, error: { message: `refused ${method} from the renderer` } };
     }
+    const params = { ...(payload?.params ?? {}) };
+    // Pin the space to the window that sent this. Without it the comment on
+    // `aragon:window` ("one space can never touch another") is false: the payload
+    // carries `spaceId`, so chrome in space 1 could close or navigate space 2.
+    // The policy (and which methods are exempt) lives in space-scope.js, where it
+    // is unit-tested - a window has no way to exercise this from a test.
+    const scope = scopeRendererParams({
+      method,
+      params,
+      senderSpaceId: kernel.spaces.spaceIdForContents(event.sender),
+    });
+    if (!scope.ok) {
+      return { ok: false, error: { message: scope.error } };
+    }
     try {
-      const result = await kernel.dispatch(method, payload?.params ?? {}, { surface: "ui" });
+      const result = await kernel.dispatch(method, scope.params, { surface: "ui" });
       return { ok: true, result };
     } catch (error) {
       return {
@@ -104,6 +124,25 @@ async function boot() {
     engine: `chromium ${process.versions.chrome}`,
     runtimeFile: runtimeFilePath(),
   }));
+
+  /**
+   * Window controls for the self-drawn title bar (`frame: false`).
+   *
+   * The sender *is* the window that owns the button, so no id crosses the
+   * boundary and one space can never minimize or close another. Same promise as
+   * the rpc channel above: the renderer drives chrome, never the agent surface.
+   */
+  ipcMain.handle("aragon:window", async (event, action) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) {
+      return { ok: false, error: { message: "this view is not owned by a window" } };
+    }
+    try {
+      return { ok: true, result: applyWindowAction(win, action) };
+    } catch (error) {
+      return { ok: false, error: { message: error?.message ?? String(error) } };
+    }
+  });
 
   const coordinates = await transport.listen();
   console.log(

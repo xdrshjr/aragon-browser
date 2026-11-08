@@ -55,6 +55,20 @@ export class TaskSpaceManager {
     return [...this.spaces.values()].map((space) => this.describe(space));
   }
 
+  /**
+   * Which space owns this webContents? Used to pin renderer RPCs to the window
+   * that sent them, so a `spaceId` in the payload cannot address a sibling window.
+   * Returns null for anything that is not a space window (e.g. the API window).
+   */
+  spaceIdForContents(contents) {
+    for (const space of this.spaces.values()) {
+      if (space.window && !space.window.isDestroyed() && space.window.webContents === contents) {
+        return space.id;
+      }
+    }
+    return null;
+  }
+
   describe(space) {
     return {
       id: space.id,
@@ -118,9 +132,19 @@ export class TaskSpaceManager {
       height: 860,
       minWidth: LAYOUT.minWidth,
       minHeight: LAYOUT.minHeight,
-      title: `aragon-browser - ${space.name}`,
+      title: `aragon-browser - ${space.name} (#${id})`,
       backgroundColor: "#11131a",
       show: false,
+      // No native caption. The renderer paints its own title bar (brand plus the
+      // minimize / maximize / close buttons, see src/renderer/index.html).
+      // `frame: false` on Windows keeps the WS_THICKFRAME border because
+      // `thickFrame` defaults to true, so the window still resizes from every
+      // edge, still Aero-snaps and still keeps its shadow - only the caption, and
+      // with it the system menu, is gone.
+      frame: false,
+      // The application menu still exists and still owns every accelerator; it is
+      // just not worth 26px of vertical chrome. Alt reveals it.
+      autoHideMenuBar: true,
       webPreferences: {
         preload: path.join(__dirname, "..", "preload", "ui-preload.js"),
         contextIsolation: true,
@@ -132,7 +156,42 @@ export class TaskSpaceManager {
     space.window = window;
     this.spaces.set(id, space);
 
+    // The renderer's title bar draws a maximize/restore glyph, so it has to know
+    // the real window state. Maximizing also changes the client area without a
+    // resize event on every platform, so layout is re-run from these too.
+    const publishWindowState = () => {
+      // Both checks matter: closing a space destroys its tab views first, and the
+      // 'destroyed' handler they trigger can run while `isDestroyed()` is still
+      // false but `webContents` is already gone. Sending then throws from inside an
+      // event handler, i.e. uncaught in the main process.
+      if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+      window.webContents.send("aragon:window-state", {
+        maximized: window.isMaximized(),
+        fullScreen: window.isFullScreen(),
+      });
+    };
+    window.on("maximize", () => {
+      publishWindowState();
+      this.layout(space);
+    });
+    window.on("unmaximize", () => {
+      publishWindowState();
+      this.layout(space);
+    });
+    // Alt reveals the auto-hidden application menu, which shrinks the CLIENT area
+    // while the HWND stays the same size - so no resize/resized event fires and the
+    // page views keep their old bounds, ending up over the status bar. These two
+    // events are the only signal the menu toggled.
+    window.on("menu-bar-visible", () => this.layout(space));
+    window.on("menu-bar-hidden", () => this.layout(space));
+
     window.loadFile(path.join(RENDERER_DIR, "index.html"));
+    // The renderer's `<title>` must not rename the window. The OS title is how a
+    // human tells these windows apart in the task bar (one BrowserWindow per
+    // space), and it is also how `ui.captureWindow` identifies its own window:
+    // without this every space window is called "aragon-browser", the same name
+    // as any installed build you happen to have open.
+    window.on("page-title-updated", (event) => event.preventDefault());
     window.once("ready-to-show", () => {
       window.show();
       // Lay out again once the window is really on screen. The client area at
@@ -145,8 +204,14 @@ export class TaskSpaceManager {
     });
     window.on("resize", () => this.layout(space));
     window.on("resized", () => this.layout(space));
-    window.on("enter-full-screen", () => this.layout(space));
-    window.on("leave-full-screen", () => this.layout(space));
+    window.on("enter-full-screen", () => {
+      publishWindowState();
+      this.layout(space);
+    });
+    window.on("leave-full-screen", () => {
+      publishWindowState();
+      this.layout(space);
+    });
     window.on("closed", () => {
       void this.#dispose(space);
     });

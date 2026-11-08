@@ -1,4 +1,9 @@
 const els = {
+  titlebar: document.getElementById("titlebar"),
+  titleSpace: document.getElementById("tb-space"),
+  winMin: document.getElementById("win-min"),
+  winMax: document.getElementById("win-max"),
+  winClose: document.getElementById("win-close"),
   spaceList: document.getElementById("space-list"),
   newSpace: document.getElementById("new-space"),
   tabs: document.getElementById("tabs"),
@@ -63,6 +68,11 @@ function renderChrome() {
   els.owner.dataset.owner = space.owner;
   els.handoff.textContent = space.owner === "agent" ? "give to user" : "take back";
   els.agentState.textContent = `agent: ${space.agentState}`;
+  // The window is frameless, so this title bar line is the only place the
+  // human can see which space this window is - the OS caption is gone. It is also
+  // truncated at the minimum width, so keep the full text in a tooltip.
+  els.titleSpace.textContent = `space ${space.id} · ${space.name} · ${space.owner}`;
+  els.titleSpace.title = els.titleSpace.textContent;
 
   els.tabs.replaceChildren();
   for (const tab of space.tabs) {
@@ -146,11 +156,51 @@ els.newSpace.addEventListener("click", async () => {
   await rpc("ui.newSpace", { name: `space-${spaces.length + 1}` });
 });
 
+// --- window controls -------------------------------------------------------
+// The window has no native caption, so these three buttons are the only way to
+// minimize, maximize/restore and close it. Clicking the strip itself must not
+// drag-stack up: the buttons are no-drag in CSS, and a double click on the drag
+// region is the OS's own "maximize" gesture, which Electron handles for us.
+function applyWindowState(state) {
+  // Full screen also swallows the maximize button (maximize is a no-op there), so
+  // it has to show as "restore" too or the button becomes a dead control that
+  // claims the window is not maximized while it covers the whole screen.
+  const maximized = Boolean(state?.maximized || state?.fullScreen);
+  els.winMax.classList.toggle("maximized", maximized);
+  els.winMax.title = maximized ? "restore" : "maximize";
+  els.winMax.setAttribute("aria-label", maximized ? "restore" : "maximize");
+}
+
+for (const [button, action] of [
+  [els.winMin, "minimize"],
+  [els.winMax, "toggle-maximize"],
+  [els.winClose, "close"],
+]) {
+  button.addEventListener("click", async () => {
+    const response = await window.aragon.windowAction(action);
+    if (!response?.ok) {
+      setStatus(response?.error?.message ?? `window ${action} failed`, true);
+      return;
+    }
+    // `toggle-maximize` reads the state immediately after asking, which on Windows
+    // is before the maximize event lands - applying that reply would flip the glyph
+    // back to "maximize" for a frame. The pushed state is the truth.
+    if (action !== "toggle-maximize") applyWindowState(response.result);
+  });
+}
+
+window.aragon.onWindowState((state) => applyWindowState(state));
+
 window.aragon.onState((next) => applyState(next));
 
 const initial = await window.aragon.getState();
 spaceIdLabel(initial);
 applyState(initial.spaces);
+// A window can open already maximized (or be restored that way); ask once so the
+// button does not show the wrong glyph until something resizes. A failed read must
+// not be applied: `undefined` would silently claim "not maximized".
+const initialWindow = await window.aragon.windowAction("state");
+if (initialWindow?.ok) applyWindowState(initialWindow.result);
 
 function spaceIdLabel(state) {
   els.engine.textContent = `nano · ${state.engine ?? ""}`;

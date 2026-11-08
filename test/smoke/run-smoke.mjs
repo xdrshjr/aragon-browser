@@ -10,6 +10,14 @@ import { startFixture } from "./fixture-server.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..", "..");
 const RUNTIME_FILE = path.join(os.tmpdir(), "aragon-browser-smoke", `runtime-${process.pid}.json`);
+// Everything this run writes lives under one scratch root, so a test can never
+// touch the real profile.
+const SMOKE_ROOT = path.dirname(RUNTIME_FILE);
+// The app takes a single-instance lock per userData directory. Without this the
+// smoke run silently fails ("timed out waiting for runtime coordinates") whenever
+// the human has an aragon-browser open - including the very build you just made.
+// A scratch userData dir also keeps the test out of the real profile.
+const USER_DATA = path.join(SMOKE_ROOT, `userdata-${process.pid}`);
 
 function log(line) {
   process.stdout.write(`${line}\n`);
@@ -48,13 +56,27 @@ function runCli(source) {
 
 async function main() {
   fs.rmSync(path.dirname(RUNTIME_FILE), { recursive: true, force: true });
+  // A fresh userData dir means the first-run dialog would pop up mid-test and
+  // steal focus from the window the UI check captures. The marker is the same
+  // file ensureSetup() writes, so pre-creating it just says "announced already".
+  fs.mkdirSync(USER_DATA, { recursive: true });
+  fs.writeFileSync(path.join(USER_DATA, ".setup-complete"), new Date().toISOString());
   const fixture = await startFixture(0, path.join(ROOT, "artifacts"));
   log(`fixture on ${fixture.baseUrl}`);
 
   const appOut = [];
-  const electron = spawn(electronPath, [ROOT, "--disable-gpu"], {
+  const electron = spawn(electronPath, [ROOT, "--disable-gpu", `--user-data-dir=${USER_DATA}`], {
     cwd: ROOT,
-    env: { ...process.env, ARAGON_RUNTIME_FILE: RUNTIME_FILE },
+    env: {
+      ...process.env,
+      ARAGON_RUNTIME_FILE: RUNTIME_FILE,
+      // First-run setup writes the CLI shim into LOCALAPPDATA and copies the agent
+      // skill into ~/.claude, ~/.codex and ~/.cursor. Point both at scratch dirs:
+      // the comment on USER_DATA above would otherwise be a lie, and a test must
+      // never rewrite the developer's real profile.
+      LOCALAPPDATA: path.join(SMOKE_ROOT, "localappdata"),
+      ARAGON_HOME: path.join(SMOKE_ROOT, "home"),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   electron.stdout.on("data", (chunk) => {
@@ -78,6 +100,7 @@ async function main() {
     });
     await fixture.close();
     fs.rmSync(path.dirname(RUNTIME_FILE), { recursive: true, force: true });
+    fs.rmSync(USER_DATA, { recursive: true, force: true });
   };
 
   try {

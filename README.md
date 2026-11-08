@@ -136,9 +136,9 @@ npm run dist        # 出 dist/aragon-browser-0.1.0-x64.exe 和 -portable.exe
 ## 它证明自己真的能用的方式
 
 ```bash
-npm test                 # 67 个单元测试：locator 语法、快照、ref、learning 校验、skills 结构、传输、分区
+npm test                 # 98 个单元测试：locator 语法、快照、ref、learning 校验、skills 结构、传输、分区、窗口控制与 space 作用域
 npm run smoke            # 43 项真浏览器端到端断言
-npm run smoke:ui         # 5 项 UI / 布局 / 像素 / 历史断言
+npm run smoke:ui         # 7 项 UI / 布局 / 像素 / 历史 / 无边框窗口断言
 npm run smoke:packaged   # 11 项针对打包产物的断言（含 skill 可被发现）
 npm run validate:skills  # 站点技能格式校验
 ```
@@ -196,11 +196,46 @@ src/kernel/                      浏览器侧：RPC 方法表
    └ runtime-transport.js        服务端 socket + 坐标发布
    ▲
    │  electron IPC（只允许 ui.*）
-src/renderer/                    浏览器界面：侧边栏 / 标签栏 / 地址栏 / 前进后退 / handoff
+src/renderer/                    浏览器界面：自绘标题栏 / 侧边栏 / 标签栏 / 地址栏 / 前进后退 / handoff
 
 skills/aragon-browser/           agent 面向的全部内容（入口 skill + 参考 + learnings）
 src/cli/skill-body/SKILL.md      CLI 打印的完整手册（按 schema 渲染）
 ```
+
+### 窗口骨架：标题栏是自己画的
+
+窗口是 `frame: false` 的无边框窗口，**原生标题栏没有了**，但所有看得见的东西都还在：
+
+| 部分 | 谁画 | 说明 |
+|---|---|---|
+| 标题栏（34px） | renderer `#titlebar` | 品牌、`space <id> · <name> · <owner>`、右侧最小化/最大化-还原/关闭 |
+| 标签栏 + 地址栏（78px） | renderer `#chrome` | 原来就有 |
+| 页面视图 | `WebContentsView` | 位置由 `src/shared/layout.js` 的 `pageBounds()` 算，`y` 必须 ≥ 标题栏高度 |
+
+几处不是装饰、是坑的地方：
+
+- **按钮在拖拽区里**：`#titlebar` 是 `-webkit-app-region: drag`，`.win-controls` 必须 `no-drag`，
+  否则按钮点不动（能被拖，不能被点）。
+- **页面视图会盖住标题栏**：`WebContentsView` 是子视图，合成在窗口自己的 web contents 之上。
+  `pageBounds()` 的 `y` 必须把 34px 标题栏也算进去；`styles.css` 的 `--titlebar-height`
+  和 `LAYOUT.titleBarHeight` 由 `test/titlebar.test.mjs` 盯着，drift 了就红。
+- **一个按钮两种含义**：最大化和还原是同一个按钮，动作是「读当前状态再取反」，
+  不是让渲染器猜自己该发哪个（`src/main/window-controls.js`）。
+- **窗口标题不能被渲染器改**：`index.html` 的 `<title>` 会把 OS 窗口标题改成
+  `aragon-browser`，于是每个 space 窗口同名，和装好的构建撞名；
+  `page-title-updated` 里 `preventDefault()`，标题始终是 `aragon-browser - <space>`。
+- **应用菜单默认收起**（`autoHideMenuBar`），按 Alt 唤出；菜单项和快捷键一个都没少。
+
+`test/titlebar.test.mjs` 用假窗口对象测动作映射（`npm test` 里跑），
+`npm run smoke:ui` 在真 Electron 里断言几件肉眼容易骗人的事：
+`getSize() - getContentSize()` 接近 0（证明真的无边框）、页面视图 `y === 112`（证明没压住标题栏），
+以及整窗截图的 `sourceName` 里带 space id、尺寸正好是窗口的 2 倍（证明截到的是**自己这个窗口**，
+不是同名的另一个实例）。
+
+space 作用域也在单测里：渲染器的 RPC 只认「发消息的那个窗口」的 space，名字对不上的直接拒绝，
+唯一例外是侧边栏的 `ui.focusSpace`（点另一个 space 就是要聚焦它的窗口）。
+
+---
 
 ### Agent 接进来要走的路径
 

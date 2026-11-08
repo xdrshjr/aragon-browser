@@ -16,4 +16,12 @@ contextBridge.exposeInMainWorld("aragon", {
     ipcRenderer.on("aragon:state", handler);
     return () => ipcRenderer.removeListener("aragon:state", handler);
   },
+  // The window has no native title bar, so minimize / maximize / close are the
+  // renderer's buttons. Only the actions below exist; nothing else is reachable.
+  windowAction: (action) => ipcRenderer.invoke("aragon:window", action),
+  onWindowState: (listener) => {
+    const handler = (_event, state) => listener(state);
+    ipcRenderer.on("aragon:window-state", handler);
+    return () => ipcRenderer.removeListener("aragon:window-state", handler);
+  },
 });

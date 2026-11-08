@@ -40,6 +40,7 @@ import {
   waitForText,
 } from "./waits.js";
 import { TaskSpaceManager } from "./task-spaces.js";
+import { LAYOUT } from "../shared/layout.js";
 import {
   loadLearnedContext,
   loadBrowserToolSource,
@@ -956,6 +957,9 @@ export class BrowserKernel {
             `space ${space.id} has no window to capture`,
           );
         }
+        // A minimized window has no thumbnail, and `show()` does not un-minimize on
+        // Windows - so capture would fail for a perfectly capturable window.
+        if (space.window.isMinimized()) space.window.restore();
         space.window.show();
         space.window.focus();
         await delay(350);
@@ -965,17 +969,27 @@ export class BrowserKernel {
           thumbnailSize: { width: width * 2, height: height * 2 },
         });
         const title = space.window.getTitle();
-        const match =
-          sources.find((source) => source.name === title) ??
-          sources.find((source) => /aragon/i.test(source.name));
-        if (!match || match.thumbnail.isEmpty()) {
+        // Exact title only. A prefix or loose /aragon/ match is NOT a fallback: the
+        // installed build, an older dev instance, or a sibling space whose name
+        // merely starts with this one ("home" vs "home2") matches it too, and the
+        // capture then silently returns a picture of the WRONG window - a green
+        // assertion that proves nothing. The title carries the space id
+        // (`aragon-browser - <name> (#<id>)`) so it is unique by construction.
+        const candidates = sources.filter((source) => source.name === title);
+        if (candidates.length !== 1) {
           throw new AragonError(
             ERROR_CODES.OPERATION_FAILED,
-            `no desktop capture source matched window "${title}" (found: ${sources
-              .map((source) => source.name)
-              .join(" | ")})`,
+            `no unique desktop capture source for window "${title}" (matched ${candidates.length}; ` +
+              `sources: ${sources.map((source) => source.name || "<untitled>").join(" | ")})`,
           );
         }
+        if (candidates[0].thumbnail.isEmpty()) {
+          throw new AragonError(
+            ERROR_CODES.OPERATION_FAILED,
+            `window "${title}" produced an empty thumbnail (minimized, or the session is locked)`,
+          );
+        }
+        const match = candidates[0];
         return {
           base64: match.thumbnail.toPNG().toString("base64"),
           size: match.thumbnail.getSize(),
@@ -989,9 +1003,22 @@ export class BrowserKernel {
           throw new AragonError(ERROR_CODES.OPERATION_FAILED, "space has no window");
         }
         const [width, height] = space.window.getContentSize();
+        const [outerWidth, outerHeight] = space.window.getSize();
         const tab = space.tabs.find((entry) => entry.id === space.activeTabId);
         return {
           contentSize: { width, height },
+          // A native caption and its borders live OUTSIDE the client area, so a
+          // framed window always reports a getSize() tens of pixels bigger. Being
+          // equal proves the self-drawn title bar replaced the native one. The one
+          // exception is a *maximized* window, which hangs off the work area by
+          // the resize border (8px per side on Windows) - hence "close", not "===".
+          windowSize: { width: outerWidth, height: outerHeight },
+          // Reported so a caller can tell which case it is looking at instead of
+          // guessing from the numbers.
+          maximized: space.window.isMaximized(),
+          titleBarHeight: LAYOUT.titleBarHeight,
+          chromeHeight: LAYOUT.chromeHeight,
+          statusHeight: LAYOUT.statusHeight,
           viewBounds: tab ? tab.view.getBounds() : null,
           visible: tab ? tab.view.getVisible?.() ?? null : null,
           viewCount: space.tabs.length,

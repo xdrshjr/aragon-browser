@@ -360,7 +360,23 @@ function useSpace(helpers, id) {
 
 test("page bounds stop above the 22px status bar", () => {
   const bounds = pageBounds({ width: 1280, height: 860 });
-  assert.equal(bounds.height, 860 - LAYOUT.chromeHeight - LAYOUT.statusHeight);
+  assert.equal(
+    bounds.height,
+    860 - LAYOUT.titleBarHeight - LAYOUT.chromeHeight - LAYOUT.statusHeight,
+  );
   assert.equal(LAYOUT.statusHeight, 22);
+  assert.equal(bounds.y, LAYOUT.titleBarHeight + LAYOUT.chromeHeight);
   assert.ok(bounds.y + bounds.height <= 860 - LAYOUT.statusHeight);
+});
+
+test("page bounds leave room for the self-drawn title bar", () => {
+  // The window is frameless, so the renderer's title bar (and its minimize /
+  // maximize / close buttons) is the only thing at the top of the window. If the
+  // page view started at y=0 it would composite over those buttons.
+  assert.ok(LAYOUT.titleBarHeight >= 24, `title bar is too short: ${LAYOUT.titleBarHeight}`);
+  const bounds = pageBounds({ width: 1280, height: 860 });
+  assert.ok(
+    bounds.y >= LAYOUT.titleBarHeight,
+    `page view starts at y=${bounds.y}, on top of the title bar`,
+  );
 });
