@@ -6,10 +6,31 @@ import { fileURLToPath } from "node:url";
 import { applyWindowAction, windowStateOf } from "../src/main/window-controls.js";
 import { scopeRendererParams } from "../src/main/space-scope.js";
 import { LAYOUT, pageBounds } from "../src/shared/layout.js";
+import { decodePng, encodePng, resizeRgba } from "../scripts/png.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const read = (...parts) => fs.readFileSync(path.join(ROOT, ...parts), "utf8");
+
+/**
+ * Every `selector { body }` rule in the stylesheet, in order. The stylesheet has no
+ * at-rules that nest blocks, so this flat scan is the whole file - which is what
+ * lets a test say "no rule anywhere turns dragging back off" instead of checking
+ * the handful of selectors someone remembered.
+ */
+function cssRules(css) {
+  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({
+    selector: match[1].trim().replace(/\s+/g, " "),
+    body: match[2],
+  }));
+}
+
+/** Selectors whose body sets `-webkit-app-region` to `value`. */
+function appRegionSelectors(css, value) {
+  return cssRules(css)
+    .filter((rule) => new RegExp(`-webkit-app-region:\\s*${value}\\b`).test(rule.body))
+    .map((rule) => rule.selector);
+}
 
 /**
  * The body of one CSS rule, brace-matched. A plain `slice(indexOf(...), next }})`
@@ -125,7 +146,7 @@ test("the title bar carries minimize, maximize and close, in that order, on the 
   assert.match(cssBlock(css, ".win-controls {"), /flex:\s*none/);
 });
 
-test("the title bar is a drag region and its buttons are not", () => {
+test("the title bar is a drag region and only the window buttons opt out", () => {
   const css = read("src", "renderer", "styles.css");
   // Brace-matched, so a later override of the same selector cannot hide behind a
   // first-match slice, and the height assertion binds to the variable.
@@ -141,6 +162,27 @@ test("the title bar is a drag region and its buttons are not", () => {
     /-webkit-app-region:\s*no-drag/,
     "a draggable button cannot be clicked",
   );
+
+  // The regression this assertion exists for: `.tb-space` was `no-drag` so its
+  // tooltip would work, but it is `flex: 1` - it covers the whole gap between the
+  // brand and the buttons. Windows then hit-tests that span as HTCLIENT, i.e. the
+  // window could only be dragged by the few pixels left of the brand. Verified
+  // against a real window with WM_NCHITTEST: 90% of the strip answered HTCLIENT.
+  //
+  // So: no rule outside the window controls may switch dragging off. Any future
+  // opt-out (a new button, an input in the strip) belongs under `.win-controls`
+  // or has to update this list deliberately.
+  assert.deepEqual(
+    appRegionSelectors(css, "no-drag"),
+    [".win-controls"],
+    "only the window controls may be excluded from the drag region",
+  );
+  // And the label that fills the strip has to say so out loud, not rely on
+  // inheriting an ancestor's region by accident.
+  assert.match(cssBlock(css, ".tb-space {"), /-webkit-app-region:\s*drag/);
+  // A tooltip inside a drag region can never open, so it must not pretend to.
+  assert.doesNotMatch(read("src", "renderer", "ui.js"), /titleSpace\.title/, "a tooltip in the drag region never fires");
+
   // The CSS height and the layout constant have to agree or the page view covers
   // the buttons. Both are read here so drift fails a test instead of a human.
   assert.match(css, new RegExp(`--titlebar-height:\\s*${LAYOUT.titleBarHeight}px`));
@@ -360,4 +402,57 @@ test("the page view starts below the title bar, not under it", () => {
   assert.equal(bounds.y, LAYOUT.titleBarHeight + LAYOUT.chromeHeight);
   assert.equal(bounds.y, 112);
   assert.ok(bounds.height > 700, `page view is only ${bounds.height}px tall`);
+});
+
+test("the header shows the app icon, not a typed placeholder glyph", () => {
+  const html = read("src", "renderer", "index.html");
+  // The bug: the header drew "◈", which is the shape make-icon.mjs uses for its
+  // PLACEHOLDER. So the packaged window showed something that had nothing to do
+  // with the icon the installer, the exe and the task bar show.
+  assert.doesNotMatch(html, /◈/, "the placeholder glyph is not the app's logo");
+  assert.doesNotMatch(html, /class="mark"/, "the old glyph span is gone");
+  assert.match(html, /<img[^>]*class="tb-mark"[^>]*src="brand\.png"/, "the brand mark is the icon file");
+  assert.match(html, /alt=""/, "decorative next to the word mark, so an empty alt");
+  // It must be inside the title bar, not somewhere else in the chrome.
+  const titlebar = html.slice(html.indexOf('id="titlebar"'), html.indexOf('id="sidebar"'));
+  assert.match(titlebar, /src="brand\.png"/);
+
+  const css = read("src", "renderer", "styles.css");
+  assert.match(cssBlock(css, ".tb-mark {"), /width:\s*18px/);
+  // The old glyph rule has to be gone, or it silently loses its subject.
+  assert.doesNotMatch(css, /\.tb-brand \.mark/);
+
+  // Generated, not hand-edited: it has to be a real PNG the renderer can decode.
+  const brand = decodePng(fs.readFileSync(path.join(ROOT, "src", "renderer", "brand.png")));
+  assert.equal(brand.width, 64);
+  assert.equal(brand.height, 64);
+  // 18 CSS px at 3.5x DPI, and small enough that opening a window does not decode
+  // a megapixel image for a 16px mark.
+  assert.ok(fs.statSync(path.join(ROOT, "src", "renderer", "brand.png")).size < 40_000);
+  // Transparent margin, opaque artwork: the swirl icon is a cut-out, and a brand
+  // chip with a white box around it is exactly what the header looked wrong with.
+  const alphaAt = (x, y) => brand.data[(y * brand.width + x) * 4 + 3];
+  assert.equal(alphaAt(0, 0), 0, "the corner must be transparent");
+  assert.equal(alphaAt(brand.width - 1, brand.height - 1), 0);
+  const opaque = [...Array(brand.width * brand.height).keys()].filter(
+    (i) => brand.data[i * 4 + 3] > 200,
+  ).length;
+  assert.ok(opaque > 1000, `the mark has only ${opaque} opaque pixels - the resize lost the artwork`);
+});
+
+test("brand.png is exactly the app icon, downscaled - so it cannot drift", () => {
+  // One source of truth: build/icon.png is what electron-builder burns into the exe
+  // and the installer, so the header must be derived from it, not drawn by hand.
+  // Regenerating is byte-identical, which is why the file is committed and why
+  // `npm run build` can safely refresh it.
+  const icon = decodePng(fs.readFileSync(path.join(ROOT, "build", "icon.png")));
+  const expected = encodePng(64, 64, resizeRgba(icon, 64, 64));
+  const shipped = fs.readFileSync(path.join(ROOT, "src", "renderer", "brand.png"));
+  assert.ok(
+    expected.equals(shipped),
+    "src/renderer/brand.png is stale: run `npm run brand` after changing build/icon.png",
+  );
+  // And it has to actually be packaged - a brand mark that only exists in the dev
+  // tree is the "works before `npm run dist`" trap this project has hit before.
+  assert.match(read("electron-builder.yml"), /"src\/renderer\/\*\*\/\*"/);
 });

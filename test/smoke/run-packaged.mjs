@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import asar from "@electron/asar";
 import { startFixture } from "./fixture-server.mjs";
 
 /**
@@ -75,6 +76,68 @@ async function main() {
     return;
   }
   log(`packaged app: ${EXE}`);
+
+  // ---- what actually got sealed into the asar -------------------------------
+  // Three chrome bugs were reported against the INSTALLED app, not `npm start`:
+  // the header drew a placeholder glyph instead of the app icon, the title bar
+  // could not be dragged, and the sidebar printed a build number and the absolute
+  // path of runtime.json. Every one of them is a renderer source fact, so the
+  // packaged asar is where they are checked - a fixed source tree with a stale
+  // build is exactly how they shipped in the first place.
+  const archive = path.join(path.dirname(EXE), "resources", "app.asar");
+  if (!fs.existsSync(archive)) {
+    log(`FAIL no app.asar next to the exe (${archive})`);
+    process.exitCode = 1;
+    return;
+  }
+  const fromAsar = (entry) => asar.extractFile(archive, entry).toString("utf8");
+  const html = fromAsar(path.join("src", "renderer", "index.html"));
+  const css = fromAsar(path.join("src", "renderer", "styles.css"));
+  const ui = fromAsar(path.join("src", "renderer", "ui.js"));
+  const brand = asar.extractFile(archive, path.join("src", "renderer", "brand.png"));
+
+  if (!/<img[^>]*class="tb-mark"[^>]*src="brand\.png"/.test(html) || html.includes("\u25c8")) {
+    log("FAIL the packaged header does not use the app icon (or still has the placeholder glyph)");
+    process.exitCode = 1;
+    return;
+  }
+  if (brand.subarray(1, 4).toString("ascii") !== "PNG") {
+    log("FAIL src/renderer/brand.png in the asar is not a PNG");
+    process.exitCode = 1;
+    return;
+  }
+  log(`PASS packaged header ships the app icon (brand.png, ${brand.length} bytes)`);
+
+  // The drag regression: any `no-drag` outside the window controls turns the strip
+  // back into a HTCLIENT hole and the window cannot be moved by its title bar.
+  const optOuts = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((rule) => /-webkit-app-region:\s*no-drag\b/.test(rule[2]))
+    .map((rule) => rule[1].trim());
+  if (optOuts.length !== 1 || optOuts[0] !== ".win-controls") {
+    log(`FAIL packaged title bar excludes ${JSON.stringify(optOuts)} from dragging, expected only .win-controls`);
+    process.exitCode = 1;
+    return;
+  }
+  if (!/-webkit-app-region:\s*drag/.test(css)) {
+    log("FAIL packaged stylesheet has no drag region at all");
+    process.exitCode = 1;
+    return;
+  }
+  log("PASS packaged title bar is draggable except the window controls");
+
+  for (const [label, re] of [
+    ["engine label", /id="engine"/],
+    ["runtime path label", /id="runtime"/],
+    ["engine/runtime wiring", /getElementById\("(engine|runtime)"\)/],
+  ]) {
+    const haystack = label === "engine/runtime wiring" ? ui : html;
+    if (re.test(haystack)) {
+      log(`FAIL packaged chrome still contains the ${label}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  log("PASS packaged chrome has no engine / runtime-path footer");
 
   fs.rmSync(path.dirname(RUNTIME_FILE), { recursive: true, force: true });
   fs.rmSync(SCRATCH, { recursive: true, force: true });

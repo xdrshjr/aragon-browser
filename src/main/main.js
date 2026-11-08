@@ -129,8 +129,6 @@ async function boot() {
     spaces: kernel.spaces.list(),
     focusedSpaceId: kernel.spaces.focusedSpaceId,
     version: VERSION,
-    engine: `chromium ${process.versions.chrome}`,
-    runtimeFile: runtimeFilePath(),
   }));
 
   /**

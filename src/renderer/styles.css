@@ -30,10 +30,6 @@ body {
   user-select: none;
 }
 
-.mono {
-  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-}
-
 /* ---------- custom title bar (the window is frameless) ---------- */
 
 #titlebar {
@@ -66,9 +62,16 @@ body {
   flex: none;
 }
 
-.tb-brand .mark {
-  color: var(--accent);
-  font-size: 14px;
+/* The app icon, downscaled. Its source PNG has a transparent margin, so the
+   drawn art is a little smaller than the 18px box - that is what keeps it from
+   touching the word mark. `image-rendering: auto` on purpose: the swirl is
+   glossy, and pixelated edges make it look like a broken bitmap at 18px. */
+.tb-mark {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  display: block;
+  object-fit: contain;
 }
 
 .tb-brand b {
@@ -85,10 +88,14 @@ body {
   font-size: 11px;
   letter-spacing: 0.3px;
   text-align: center;
-  /* Inside the drag region, caption hit-testing swallows mouse events, so a
-     `title` tooltip on the truncated name would never appear. Opt this label out
-     of dragging to keep the tooltip working. */
-  -webkit-app-region: no-drag;
+  /* This label used to be `no-drag`, to keep its tooltip alive. That made ~90% of
+     the title bar undraggable: the label is `flex: 1`, so it covers the whole gap
+     between the brand and the window buttons, and Windows hit-tests it as
+     HTCLIENT instead of HTCAPTION - the window could only be moved by grabbing
+     the few pixels left of the brand. A drag region swallows mouse events, so a
+     tooltip here can never fire anyway; the full text lives in the status bar
+     (`showing space N · name · owner`) and in the rail. */
+  -webkit-app-region: drag;
 }
 
 .win-controls {
@@ -313,16 +320,6 @@ button.ghost {
 button.ghost:hover {
   color: var(--text);
   border-color: var(--accent);
-}
-
-.side-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 10px;
-  padding: 4px 6px 0;
-  border-top: 1px solid var(--line);
-  word-break: break-all;
 }
 
 .muted {

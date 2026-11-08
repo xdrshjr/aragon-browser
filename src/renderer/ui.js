@@ -15,8 +15,6 @@ const els = {
   handoff: document.getElementById("handoff"),
   status: document.getElementById("status"),
   agentState: document.getElementById("agent-state"),
-  engine: document.getElementById("engine"),
-  runtime: document.getElementById("runtime"),
 };
 
 let spaces = [];
@@ -93,10 +91,11 @@ function renderChrome() {
   els.handoff.textContent = space.owner === "agent" ? "give to user" : "take back";
   els.agentState.textContent = `agent: ${space.agentState}`;
   // The window is frameless, so this title bar line is the only place the
-  // human can see which space this window is - the OS caption is gone. It is also
-  // truncated at the minimum width, so keep the full text in a tooltip.
+  // human can see which space this window is - the OS caption is gone. It is
+  // truncated at the minimum width and lives inside the drag region, where the OS
+  // swallows mouse events, so a `title` tooltip would never open: the full text is
+  // repeated in the status bar instead (see describeFocused below).
   els.titleSpace.textContent = `space ${space.id} · ${space.name} · ${space.owner}`;
-  els.titleSpace.title = els.titleSpace.textContent;
 
   els.tabs.replaceChildren();
   for (const tab of space.tabs) {
@@ -242,15 +241,12 @@ window.aragon.onState((next) => applyState(next));
 
 const initial = await window.aragon.getState();
 applyState(initial);
-spaceIdLabel(initial);
+// `applyState` only overwrites a status that is empty or an old "showing …", and
+// on first paint the status bar still says "ready" from index.html. Say it once
+// explicitly so the bar never keeps a promise ("ready") that scrolled past.
+setStatus(describeFocused());
 // A window can open already maximized (or be restored that way); ask once so the
 // button does not show the wrong glyph until something resizes. A failed read must
 // not be applied: `undefined` would silently claim "not maximized".
 const initialWindow = await window.aragon.windowAction("state");
 if (initialWindow?.ok) applyWindowState(initialWindow.result);
-
-function spaceIdLabel(state) {
-  els.engine.textContent = `nano · ${state.engine ?? ""}`;
-  els.runtime.textContent = state.runtimeFile ?? "";
-  setStatus(describeFocused());
-}

@@ -194,7 +194,7 @@ CLI 在脚本结束时自动清扫「本次运行打开的、未被声明的」�
 
 | 部分 | 谁画 | 说明 |
 |---|---|---|
-| 标题栏（34px） | renderer `#titlebar` | 品牌、`space <id> · <name> · <owner>`、右侧最小化 / 最大化-还原 / 关闭 |
+| 标题栏（34px） | renderer `#titlebar` | 应用图标 + 品牌名、`space <id> · <name> · <owner>`、右侧最小化 / 最大化-还原 / 关闭 |
 | 标签栏 + 地址栏（78px） | renderer `#chrome` | 标签、前进后退、地址栏、AGENT / give to user |
 | 页面视图 | `WebContentsView` | 位置由 `src/shared/layout.js` 的 `pageBounds()` 算，`y` 必须 ≥ 标题栏高度 |
 
@@ -202,6 +202,12 @@ CLI 在脚本结束时自动清扫「本次运行打开的、未被声明的」�
 
 - **按钮在拖拽区里**：`#titlebar` 是 `-webkit-app-region: drag`，`.win-controls` 必须
   `no-drag`，否则按钮点不动（能被拖，不能被点）。
+- **只有按钮可以 `no-drag`**：`.tb-space` 曾经为了保住 tooltip 而设成 `no-drag`，可它是
+  `flex: 1`，占满品牌名到按钮之间的全部空隙——结果整条标题栏只剩品牌名左边十几个像素能拖，
+  其余地方 Windows 命中测试回的是 `HTCLIENT` 而不是 `HTCAPTION`。拖不动是真的，不是错觉。
+  `test/titlebar.test.mjs` 现在断言**全表只有 `.win-controls` 一个 `no-drag`**，
+  以后加控件想退出拖拽区，就得显式改这条断言。拖拽区里 tooltip 永远弹不出来，
+  所以那个 `title` 也一并删了，空间全名在状态栏里重复一次。
 - **页面视图会盖住标题栏**：`WebContentsView` 合成在窗口自己的 web contents 之上。
   `pageBounds()` 的 `y` 必须把 34px 标题栏算进去；`styles.css` 的 `--titlebar-height`
   和 `LAYOUT.titleBarHeight` 由 `test/titlebar.test.mjs` 盯着，drift 了就红。
@@ -210,6 +216,15 @@ CLI 在脚本结束时自动清扫「本次运行打开的、未被声明的」�
 - **窗口标题不能被渲染器改**：`index.html` 的 `<title>` 会把 OS 窗口标题改成
   `aragon-browser`，和装好的构建撞名；`page-title-updated` 里 `preventDefault()`，
   标题始终由内核写成 `aragon-browser - <space> (#<id>)`。
+
+### 侧边栏只放 space
+
+左下角曾经有一块调试页脚，打印 `nano · chromium <版本>` 和 `runtime.json` 的**绝对路径**
+（`C:\Users\<name>\AppData\Local\Temp\...`）。那是开发时的脚手架，却跟着构建一起发了出去：
+对用浏览器的人来说没有任何意义，默认窗口宽度下还要折成三行。现在这两样东西只出现在
+**stdout 启动日志**（`[aragon-browser] runtime listening on ...`）和 CLI 的 `version` 里，
+不再画进窗口。`test/sidebar.test.mjs` 守着 `#engine` / `#runtime` / `.side-foot` 不会回来，
+连 `aragon:state` 的 IPC 载荷里也不许再带这两个字段——没人读的字段就是它下次回来的方式。
 
 ### 为什么 Space 要用独立 partition
 
@@ -246,10 +261,10 @@ CLI 在脚本结束时自动清扫「本次运行打开的、未被声明的」�
 ## 它怎么证明自己能用
 
 ```bash
-npm test                 # 113 个单元测试
+npm test                 # 118 个单元测试
 npm run smoke            # 53 项真浏览器端到端断言
 npm run smoke:ui         # 7 项 UI / 布局 / 像素 / 历史 / 无边框窗口断言
-npm run smoke:packaged   # 11 项针对打包产物的断言（含 skill 可被发现）
+npm run smoke:packaged   # 14 项针对打包产物的断言（含 skill 可被发现、asar 里的界面）
 npm run validate:skills  # 站点技能格式校验
 ```
 
@@ -296,6 +311,12 @@ learning 发现 / 运行 / 校验、导航后 ref 失效、前进后退、cookie
 - 首次运行写 agent skill 时用了 `os.homedir()`，测试污染了开发者自己的 `~/.claude`
   和 `~/.codex` → 改成可重定向的 home 解析，测试里正面断言 skill 落在了重定向目录
 
+界面这一层也归它管了：`smoke:packaged` 现在直接用 `@electron/asar` 把封装好的
+`app.asar` 里的 `index.html` / `styles.css` / `ui.js` / `brand.png` **抽出来**验证——
+标题栏用的是应用图标（不是占位字形）、`no-drag` 只出现在窗口按钮上、侧边栏没有
+engine / runtime-path 页脚。理由是这三个问题的报告都来自**装好的构建**：
+源码树改对了、`dist/` 还是旧的，正是它们当初被发出去的方式。
+
 ---
 
 ## API 表面
@@ -335,6 +356,20 @@ Targets：`@N`、`ref=N`、`css:<sel>`、`loc=role:<role>[name=…]`、`text=…
 `npm run build` 会先跑 `npm run icon`，而这个脚本**不会覆盖已存在的图标**（只有显式
 `--force` 才会）——否则每次打包都会把它换回占位菱形。全新 clone 没有图标时，它仍然
 负责生成一个占位图，免得打包直接失败。
+
+### 标题栏里的图标也是它
+
+标题栏左边那个图标不是打出来的符号，是 `build/icon.png` 等比缩到 18px 的副本：
+`npm run brand` 把它缩成 `src/renderer/brand.png`（64px，几 KB）。标题栏以前画的是 `◈`，
+而 `◈` 恰好是 `make-icon.mjs` 画的**占位菱形**——于是装好的构建里，窗口左上角的形状和
+任务栏、安装包、exe 上的那张图毫无关系。这类「源码里看着没事、装完才发现不对」的偏差，
+现在由两条断言堵住：一条比对 `brand.png` 与 `build/icon.png` 缩放后的字节（drift 就红），
+一条由 `npm run smoke:packaged` 直接从 **app.asar 里**把 HTML/CSS/PNG 抽出来验。
+
+为什么不在 `<img>` 里直接指 `build/icon.png`：那是 1254×1254、1.2 MB，为了 16px 的图标
+每次开窗解一遍一百万像素不划算；而且它不在 asar 里。缩放用 `scripts/png.mjs`（zlib 手写，
+premultiplied 面积平均，透明边缘不会渗黑），不引入 sharp/canvas 这种原生依赖——这也是
+图标流水线一直是代码而不是一堆检查进仓库的缩略图的原因。
 
 出图流水线与设计规范在 `scripts/gen-icons.mjs` 与 `scripts/icon-brief.md`。那份规范
 记录了提示词里**不能写什么**：写出公司名会被直接复刻，写出不想要的材料名会被当成点单。
