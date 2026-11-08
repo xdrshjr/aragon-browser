@@ -4,8 +4,11 @@ A nano browser that an AI agent drives by writing JavaScript. Named after the
 thing it actually is: a browser with a patched **engine boundary**, not a patched
 Chromium.
 
-```
-npm install
+**[下载 Windows 安装包](https://github.com/xdrshjr/aragon-browser/releases)** —
+装完就能用，不需要 Node，也不需要克隆仓库。
+
+```bash
+npm install               # 从源码跑
 npm start                 # 开发模式启动浏览器（spaces / 标签 / handoff UI）
 npm run dist              # 打包成 Windows 安装包，产物在 dist/
 aragon-browser nodejs     # 从 stdin 读脚本，在已打开的浏览器里跑
@@ -85,17 +88,31 @@ CLI 按需打印，所以永远和运行中的构建一致。
 
 ## 桌面端安装包
 
+从 [Releases](https://github.com/xdrshjr/aragon-browser/releases) 直接下载，不需要克隆仓库：
+
+| 下载 | 大小 | 适合 |
+|---|---|---|
+| `aragon-browser-0.1.0-x64.exe` | 116.1 MB | 日常使用：可选安装目录，建桌面/开始菜单快捷方式，能卸载 |
+| `aragon-browser-0.1.0-portable.exe` | 105.5 MB | 免安装单文件，U 盘带走，不写安装记录 |
+
+自己打包：
+
 ```bash
 npm install
-npm run dist        # 出 dist/aragon-browser-0.1.0-x64.exe 和 -portable.exe
+npm run dist        # 出 dist/aragon-browser-<version>-x64.exe 和 -portable.exe
 ```
 
 产物（Windows x64，Electron 45 / Chromium 156）：
 
-| 文件 | 大小 | 用途 |
-|---|---|---|
-| `aragon-browser-0.1.0-x64.exe` | 115.7 MB | NSIS 安装包，可选安装目录、桌面/开始菜单快捷方式 |
-| `aragon-browser-0.1.0-portable.exe` | 105.3 MB | 免安装单文件 |
+| 文件 | 用途 |
+|---|---|
+| `aragon-browser-0.1.0-x64.exe` | NSIS 安装包，可选安装目录、桌面/开始菜单快捷方式 |
+| `aragon-browser-0.1.0-portable.exe` | 免安装单文件 |
+| `aragon-browser-0.1.0-x64.exe.blockmap` | 增量更新用 |
+| `latest.yml` | 更新源清单（本仓库没有自己的更新器，见下面的能力差异） |
+
+**体积为什么是 100 MB 级别**：这是 Electron 应用的固有成本，不是打包没优化——Chromium
+运行时本身就占了绝大部分。本仓库没有改 Chromium 源码，也换不掉这个体积。
 
 安装后：
 
@@ -114,7 +131,22 @@ npm run dist        # 出 dist/aragon-browser-0.1.0-x64.exe 和 -portable.exe
 `Validate site skills`、`Show setup status`。
 
 安装包**没有代码签名**，Windows SmartScreen 会拦一次（"更多信息" → "仍要运行"）。
-这是一个诚实的缺口，不是被忽略的细节。
+这是一个诚实的缺口，不是被忽略的细节。费用、证书和身份验证都在开源项目这一侧。
+
+### 应用图标
+
+`build/icon.png` 是桌面端唯一生效的图标：`electron-builder.yml` 的 win / mac / linux
+三处都指向它，所以安装包、免安装版和窗口图标是同一张图。
+
+它是从一个蓝色玻璃旋涡候选里选出来的，尺寸 1254×1254、带透明通道。`npm run build`
+会先跑 `npm run icon`，而这个脚本**不会覆盖已存在的图标**（只有显式 `--force` 才会）——
+否则每次打包都会把它换回占位菱形。全新 clone 没有图标时，它仍然负责生成一个占位图，
+免得打包直接失败。
+
+重新出图的流水线和设计规范在 `scripts/gen-icons.mjs` 与 `scripts/icon-brief.md`。那
+份规范记录了提示词里**不能写什么**（写出公司名会被直接复刻，写出不想要的材料名会被
+当成点单），以及为什么纯平几何更适合用代码画（`scripts/draw-flat-icons.mjs`）而不是
+用提示词赌。
 
 ### 打包后才暴露的问题，都有测试守着
 
@@ -136,12 +168,17 @@ npm run dist        # 出 dist/aragon-browser-0.1.0-x64.exe 和 -portable.exe
 ## 它证明自己真的能用的方式
 
 ```bash
-npm test                 # 98 个单元测试：locator 语法、快照、ref、learning 校验、skills 结构、传输、分区、窗口控制与 space 作用域
-npm run smoke            # 43 项真浏览器端到端断言
+npm test                 # 113 个单元测试：locator 语法、快照、ref、learning 校验、skills 结构、传输、分区、窗口控制与 space 作用域
+npm run smoke            # 53 项真浏览器端到端断言
 npm run smoke:ui         # 7 项 UI / 布局 / 像素 / 历史 / 无边框窗口断言
 npm run smoke:packaged   # 11 项针对打包产物的断言（含 skill 可被发现）
 npm run validate:skills  # 站点技能格式校验
 ```
+
+`npm run smoke` 里那些「真实指针」断言依赖窗口能拿到前台焦点。在后台或无人值守地跑
+（CI、被其他窗口盖住、没有交互桌面的 session），Chromium 会把真实输入丢给不可见的页面，
+表现是偶发的 `click did not fire the page handler`。这是引擎行为，不是随机 bug；本机
+前台连跑三次稳定通过。要在无人值守环境跑，给它一个真实的前台桌面会话。
 
 另外手工跑通过完整链路（不是脚本）：`npm run dist` 出包 → `/S` 静默安装 → 启动安装版 →
 shim 写入 PATH → 用 `aragon-browser` 命令驱动真实 HTTPS 页面（打开 example.com、快照、
@@ -159,7 +196,7 @@ agent 脚本。fixture 是刻意设计的，每一处都对应一个真实失败
 - 有一个 `confirm()` 按钮，所以对话框处理不是纸上功能；
 - 有一个 file input 和一个拖拽源/落区。
 
-43 项断言覆盖：快照与 ref 稳定性、跨站 iframe 拍平、跨帧 fill/click 落点、真实点击
+53 项断言覆盖：快照与 ref 稳定性、跨站 iframe 拍平、跨帧 fill/click 落点、真实点击
 触发页面监听器、6 种 locator 语法、歧义选择器**快速失败**（~1ms，不是等到超时）、
 缺失元素是 transient、对话框记录与恢复、文件上传（含坏路径必须报错）、拖拽、
 剪贴板往返、6 种等待、`waitForNavigation` 能区分「真的导航了」和「什么都没发生」、
