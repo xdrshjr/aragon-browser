@@ -3,11 +3,19 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Generates the app icon as a real PNG, with no image dependency.
+ * Draws a placeholder app icon as a real PNG, with no image dependency.
  *
- * A build that ships the default Electron icon is a build nobody believes is
- * finished, and adding a canvas/sharp dependency just to draw one diamond is not
- * worth it. PNG is a container plus zlib deflate, and Node has zlib built in.
+ * This used to be the shipping icon. It is not any more: `build/icon.png` is a
+ * designed asset now (a blue glass swirl), and it is committed. This script
+ * exists only to bootstrap a checkout that has no icon at all, so `npm run
+ * build` on a fresh clone still produces an installer instead of failing on a
+ * missing file.
+ *
+ * It is therefore non-destructive: if the target already exists it leaves it
+ * alone and says so. Pass `--force` to overwrite deliberately.
+ *
+ * PNG is a container plus zlib deflate, and Node has zlib built in, so drawing
+ * the fallback needs no canvas/sharp dependency.
  */
 
 const SIZE = 1024;
@@ -141,9 +149,22 @@ export function renderIcon(size = SIZE) {
   return encodePng(size, size, pixels);
 }
 
-const target = process.argv[2] ?? "build/icon.png";
+const args = process.argv.slice(2);
+const force = args.includes("--force");
+const target = args.find((arg) => !arg.startsWith("--")) ?? "build/icon.png";
 const outputPath = path.resolve(process.cwd(), target);
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-const png = renderIcon(1024);
-fs.writeFileSync(outputPath, png);
-console.log(`[icon] wrote ${outputPath} (${png.length} bytes, 1024x1024)`);
+
+// The committed icon wins. Regenerating it here would silently replace the
+// designed asset with the placeholder on every `npm run build`.
+if (fs.existsSync(outputPath) && !force) {
+  const { size } = fs.statSync(outputPath);
+  console.log(
+    `[icon] keeping ${outputPath} (${size} bytes) - pass --force to overwrite ` +
+      `with the placeholder`,
+  );
+} else {
+  const png = renderIcon(1024);
+  fs.writeFileSync(outputPath, png);
+  console.log(`[icon] wrote ${outputPath} (${png.length} bytes, 1024x1024)`);
+}

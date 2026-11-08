@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, WebContentsView, session } from "electron";
@@ -9,6 +10,25 @@ import { RefRegistry } from "./ref-registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RENDERER_DIR = path.join(__dirname, "..", "renderer");
+
+/**
+ * Window icon for development runs.
+ *
+ * A packaged build takes its icon from the executable, which electron-builder
+ * builds out of build/icon.png, so this only matters for `npm start` - without
+ * it the taskbar shows the stock Electron atom while you are working, which is
+ * exactly when you are looking at the app most. Resolved lazily and guarded: the
+ * file is not shipped inside the asar, so a packaged run simply finds nothing
+ * and keeps the executable's icon.
+ */
+function developmentWindowIcon() {
+  const candidate = path.join(__dirname, "..", "..", "build", "icon.png");
+  try {
+    return fs.existsSync(candidate) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Task spaces.
@@ -147,6 +167,7 @@ export class TaskSpaceManager {
       minWidth: LAYOUT.minWidth,
       minHeight: LAYOUT.minHeight,
       title: "aragon-browser",
+      icon: developmentWindowIcon(),
       backgroundColor: "#11131a",
       show: false,
       frame: false,

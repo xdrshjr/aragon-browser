@@ -5,3 +5,7 @@ dist2/
 *.log
 *.blockmap
 .DS_Store
+
+# Icon candidates are exploration output (scripts/gen-icons.mjs writes here).
+# The one icon that ships is build/icon.png, which is committed.
+image/
