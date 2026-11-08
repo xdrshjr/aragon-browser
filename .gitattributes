@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+# Windows-only line-ending exceptions are deliberately absent: every source file
+# in this repo is LF in the tree, and `eol=lf` keeps it that way on any machine.
+# Without this file, `git diff` warns "LF will be replaced by CRLF" on Windows.
+*.png binary
+*.ico binary
+*.exe binary
+*.blockmap binary

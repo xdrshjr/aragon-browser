@@ -588,12 +588,13 @@ var RuntimeClient = class {
     }
     this.pending.clear();
   }
-  request(method, params = {}) {
+  request(method, params = {}, { timeoutMs } = {}) {
     if (!this.socket || this.socket.destroyed) {
       return Promise.reject(
         new AragonError(ERROR_CODES.RUNTIME_STALE, "runtime socket is not open")
       );
     }
+    const patience = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : this.timeoutMs;
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -601,10 +602,10 @@ var RuntimeClient = class {
         reject(
           new AragonError(
             ERROR_CODES.OPERATION_FAILED,
-            `${method} timed out after ${this.timeoutMs}ms`
+            `${method} timed out after ${patience}ms`
           )
         );
-      }, this.timeoutMs);
+      }, patience);
       timer.unref?.();
       this.pending.set(id, { resolve, reject, timer });
       this.socket.write(`${JSON.stringify({ id, method, params })}
@@ -777,6 +778,9 @@ var PUBLIC_API_SCHEMA = [
     summary: "Page pixels. `save` writes a file and returns its path and byte size.",
     options: {
       format: "screenshotFormat",
+      // Advertised in the signature above, and forwarded by the CLI, so it has to
+      // be declared here or `checkOptions` rejected it before the call went out.
+      clip: "object",
       fullPage: "boolean",
       save: "nonEmptyString"
     }
@@ -855,7 +859,9 @@ var PUBLIC_API_SCHEMA = [
     signature: "await page.scroll({ dx?, dy?, target? })",
     area: "act",
     summary: "Wheel scroll, optionally aimed at an element.",
-    options: { dx: "finiteNumber", dy: "finiteNumber" }
+    // `target` is in the signature and forwarded by `Page.scroll`; declaring it
+    // here is what makes scrolling at an element possible at all.
+    options: { dx: "finiteNumber", dy: "finiteNumber", target: "string" }
   },
   {
     name: "Page.drag",
@@ -1046,6 +1052,8 @@ function validateOptionValue(name, kind, value) {
         return null;
       }
       return fail('must be "all" or an array of unique non-empty Page labels');
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value) ? null : fail("must be an object");
     default:
       return null;
   }
@@ -1100,7 +1108,25 @@ function checkOptions(apiName, options) {
 }
 function createHelpers(client, { log = console.log } = {}) {
   let selectedSpaceId = null;
-  const call = (method, params = {}) => client.request(method, params);
+  const KERNEL_TIMEOUT_MS = /* @__PURE__ */ new Map([
+    ["spaces.waitForControl", 6e5],
+    ["wait.target", 1e4],
+    ["wait.text", 1e4],
+    ["wait.expression", 1e4],
+    ["wait.load", 1e4],
+    ["wait.navigation", 3e4],
+    ["wait.networkIdle", 1e4],
+    ["wait.dialog", 1e4]
+  ]);
+  const DEFAULT_TIMEOUT_MS2 = 3e4;
+  const TIMEOUT_SLACK_MS = 1e4;
+  function timeoutFor(method, params) {
+    const kernelDefault = KERNEL_TIMEOUT_MS.get(method);
+    if (kernelDefault === void 0) return void 0;
+    const requested = Number.isInteger(params.timeout) ? params.timeout : Number.isInteger(params.timeoutMs) ? params.timeoutMs : kernelDefault;
+    return Math.max(DEFAULT_TIMEOUT_MS2, requested) + TIMEOUT_SLACK_MS;
+  }
+  const call = (method, params = {}) => client.request(method, params, { timeoutMs: timeoutFor(method, params) });
   const withSpace = (params = {}) => {
     if (selectedSpaceId === null) {
       throw new AragonError(
@@ -1162,9 +1188,21 @@ function createHelpers(client, { log = console.log } = {}) {
         this.label = target.label ?? this.label;
       }
     }
-    async goto(url) {
+    /**
+     * Every method below goes through here.
+     *
+     * The kernel resolves `act.*`, `wait.*`, `snapshot.capture` and the dialog/
+     * event methods against the space's ACTIVE tab, so calling them directly meant
+     * `p1.click()` landed in whichever tab was opened or activated last.
+     * Activating this handle's own tab first is what makes `newPage(a)`,
+     * `newPage(b)`, `p1.click()` click in `a`.
+     */
+    async #call(method, params = {}) {
       await this.#ensureTab();
-      const result = await call("act.navigate", { spaceId: this.spaceId, url });
+      return call(method, { ...params, spaceId: this.spaceId });
+    }
+    async goto(url) {
+      const result = await this.#call("act.navigate", { url });
       const { tabs } = await call("tabs.list", { spaceId: this.spaceId });
       const active = tabs.find((tab) => tab.active);
       if (active) {
@@ -1174,81 +1212,80 @@ function createHelpers(client, { log = console.log } = {}) {
       return result;
     }
     async info() {
-      return call("page.info", { spaceId: this.spaceId });
+      return this.#call("page.info");
     }
     async frames() {
-      return call("page.frames", { spaceId: this.spaceId });
+      return this.#call("page.frames");
     }
     async snapshot(options = {}) {
       checkOptions("Page.snapshot", options);
-      await this.#ensureTab();
-      return call("snapshot.capture", { spaceId: this.spaceId, ...options });
+      return this.#call("snapshot.capture", options);
     }
     async click(target, options = {}) {
       checkOptions("Page.click", options);
-      return call("act.click", { spaceId: this.spaceId, target, ...options });
+      return this.#call("act.click", { target, ...options });
     }
     async doubleClick(target) {
-      return call("act.doubleClick", { spaceId: this.spaceId, target });
+      return this.#call("act.doubleClick", { target });
     }
     async rightClick(target) {
-      return call("act.rightClick", { spaceId: this.spaceId, target });
+      return this.#call("act.rightClick", { target });
     }
     async fill(target, text, options = {}) {
       checkOptions("Page.fill", options);
-      return call("act.fill", { spaceId: this.spaceId, target, text, ...options });
+      return this.#call("act.fill", { target, text, ...options });
     }
     async type(text, options = {}) {
       checkOptions("Page.type", options);
-      return call("act.type", { spaceId: this.spaceId, text, ...options });
+      return this.#call("act.type", { text, ...options });
     }
     async press(key) {
-      return call("act.press", { spaceId: this.spaceId, key });
+      return this.#call("act.press", { key });
     }
     async hover(target) {
-      return call("act.hover", { spaceId: this.spaceId, target });
+      return this.#call("act.hover", { target });
     }
     async scroll(options = {}) {
       checkOptions("Page.scroll", options);
-      return call("act.scroll", { spaceId: this.spaceId, ...options });
+      return this.#call("act.scroll", options);
     }
     async drag(from, to, options = {}) {
       checkOptions("Page.drag", options);
-      return call("act.drag", { spaceId: this.spaceId, from, to, ...options });
+      return this.#call("act.drag", { from, to, ...options });
     }
     async upload(target, files) {
-      return call("act.upload", { spaceId: this.spaceId, target, files });
+      return this.#call("act.upload", { target, files });
     }
     async clipboard(text) {
-      return call("clipboard.write", { spaceId: this.spaceId, text });
+      return this.#call("clipboard.write", { text });
     }
     async readClipboard() {
-      return call("clipboard.read", { spaceId: this.spaceId });
+      return this.#call("clipboard.read");
     }
     async goBack() {
-      return call("act.goBack", { spaceId: this.spaceId });
+      return this.#call("act.goBack");
     }
     async goForward() {
-      return call("act.goForward", { spaceId: this.spaceId });
+      return this.#call("act.goForward");
     }
     async reload() {
-      return call("act.reload", { spaceId: this.spaceId });
+      return this.#call("act.reload");
     }
     async waitFor(target, options = {}) {
       checkOptions("Page.waitFor", options);
-      return call("wait.target", { spaceId: this.spaceId, target, ...options });
+      return this.#call("wait.target", { target, ...options });
     }
     async waitForText(text, options = {}) {
       checkOptions("Page.waitForText", options);
-      return call("wait.text", { spaceId: this.spaceId, text, ...options });
+      return this.#call("wait.text", { text, ...options });
     }
     async waitForExpression(expression, options = {}) {
       checkOptions("Page.waitForExpression", options);
-      return call("wait.expression", { spaceId: this.spaceId, expression, ...options });
+      return this.#call("wait.expression", { expression, ...options });
     }
     async waitForLoad(options = {}) {
       checkOptions("Page.waitForLoad", options);
-      return call("wait.load", { spaceId: this.spaceId, ...options });
+      return this.#call("wait.load", options);
     }
     /**
      * Wait for a real navigation. Use this after a click that navigates:
@@ -1256,43 +1293,38 @@ function createHelpers(client, { log = console.log } = {}) {
      */
     async waitForNavigation(options = {}) {
       checkOptions("Page.waitForNavigation", options);
-      return call("wait.navigation", { spaceId: this.spaceId, ...options });
+      return this.#call("wait.navigation", options);
     }
     async waitForNetworkIdle(options = {}) {
       checkOptions("Page.waitForNetworkIdle", options);
-      return call("wait.networkIdle", { spaceId: this.spaceId, ...options });
+      return this.#call("wait.networkIdle", options);
     }
     async waitForDialog(options = {}) {
       checkOptions("Page.waitForDialog", options);
-      return call("wait.dialog", { spaceId: this.spaceId, ...options });
+      return this.#call("wait.dialog", options);
     }
     async answerDialog(options = {}) {
       checkOptions("Page.answerDialog", options);
-      return call("dialog.answer", { spaceId: this.spaceId, ...options });
+      return this.#call("dialog.answer", options);
     }
     async setDialogPolicy(policy) {
-      return call("dialog.policy", { spaceId: this.spaceId, policy });
+      return this.#call("dialog.policy", { policy });
     }
     async dialogs() {
-      return call("dialog.list", { spaceId: this.spaceId });
+      return this.#call("dialog.list");
     }
     async events(options = {}) {
       checkOptions("Page.events", options);
-      return call("events.history", { spaceId: this.spaceId, ...options });
+      return this.#call("events.history", options);
     }
     async evaluate(expression, options = {}) {
       checkOptions("Page.evaluate", options);
-      const result = await call("page.evaluate", {
-        spaceId: this.spaceId,
-        expression,
-        ...options
-      });
+      const result = await this.#call("page.evaluate", { expression, ...options });
       return result?.value ?? null;
     }
     async screenshot(options = {}) {
       checkOptions("Page.screenshot", options);
-      const shot = await call("shot.capture", {
-        spaceId: this.spaceId,
+      const shot = await this.#call("shot.capture", {
         format: options.format,
         clip: options.clip,
         fullPage: options.fullPage
@@ -1306,17 +1338,17 @@ function createHelpers(client, { log = console.log } = {}) {
       return { path: target, format: shot.format, bytes: import_node_fs2.default.statSync(target).size };
     }
     async cdp(message) {
-      return call("cdp.send", { spaceId: this.spaceId, message });
+      return this.#call("cdp.send", { message });
     }
     /** Learned site knowledge that applies to this page. */
     async learn(options = {}) {
-      return call("learn.context", { spaceId: this.spaceId, ...options });
+      return this.#call("learn.context", options);
     }
     async captureChrome() {
-      return call("ui.captureChrome", { spaceId: this.spaceId });
+      return this.#call("ui.captureChrome");
     }
     async captureWindow() {
-      return call("ui.captureWindow", { spaceId: this.spaceId });
+      return this.#call("ui.captureWindow");
     }
   }
   class TaskSpace {
