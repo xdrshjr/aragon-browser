@@ -261,9 +261,9 @@ CLI 在脚本结束时自动清扫「本次运行打开的、未被声明的」�
 ## 它怎么证明自己能用
 
 ```bash
-npm test                 # 118 个单元测试
+npm test                 # 122 个单元测试
 npm run smoke            # 53 项真浏览器端到端断言
-npm run smoke:ui         # 7 项 UI / 布局 / 像素 / 历史 / 无边框窗口断言
+npm run smoke:ui         # 10 项 UI / 布局 / 像素 / 历史 / 无边框窗口断言
 npm run smoke:packaged   # 14 项针对打包产物的断言（含 skill 可被发现、asar 里的界面）
 npm run validate:skills  # 站点技能格式校验
 ```
